@@ -9,6 +9,8 @@ fi
 ARTIFACTS="/tmp/artifacts-${GATHER_ID}"
 mkdir -p "${ARTIFACTS}"
 
+exec &> >(tee "${ARTIFACTS}/gather.log")
+
 echo "Gathering bootstrap systemd summary ..."
 LANG=POSIX systemctl list-units --state=failed >& "${ARTIFACTS}/failed-units.txt"
 
@@ -22,7 +24,7 @@ done
 
 echo "Gathering bootstrap journals ..."
 mkdir -p "${ARTIFACTS}/bootstrap/journals"
-for service in release-image crio-configure bootkube kubelet crio approve-csr ironic master-update-bmh
+for service in release-image crio-configure bootkube kubelet crio approve-csr ironic master-bmh-update
 do
     journalctl --boot --no-pager --output=short --unit="${service}" > "${ARTIFACTS}/bootstrap/journals/${service}.log"
 done
@@ -50,7 +52,7 @@ sudo chown -R "${USER}":"${USER}" "${ARTIFACTS}/rendered-assets"
 sudo find "${ARTIFACTS}/rendered-assets" -type d -print0 | xargs -0 sudo chmod u+x
 # remove sensitive information
 # TODO leave tls.crt inside of secret yaml files
-find "${ARTIFACTS}/rendered-assets" -name "*secret*" -print0 | xargs -0 rm
+find "${ARTIFACTS}/rendered-assets" -name "*secret*" -print0 | xargs -0 rm -rf
 find "${ARTIFACTS}/rendered-assets" -name "*kubeconfig*" -print0 | xargs -0 rm
 find "${ARTIFACTS}/rendered-assets" -name "*.key" -print0 | xargs -0 rm
 find "${ARTIFACTS}/rendered-assets" -name ".kube" -print0 | xargs -0 rm -rf

@@ -16,6 +16,7 @@ import (
 	"github.com/openshift/installer/pkg/types/azure"
 	"github.com/openshift/installer/pkg/types/baremetal"
 	"github.com/openshift/installer/pkg/types/gcp"
+	"github.com/openshift/installer/pkg/types/kubevirt"
 	"github.com/openshift/installer/pkg/types/libvirt"
 	"github.com/openshift/installer/pkg/types/none"
 	"github.com/openshift/installer/pkg/types/openstack"
@@ -24,7 +25,6 @@ import (
 )
 
 var (
-	infraCrdFilename           = filepath.Join(manifestDir, "cluster-infrastructure-01-crd.yaml")
 	infraCfgFilename           = filepath.Join(manifestDir, "cluster-infrastructure-02-config.yml")
 	cloudControllerUIDFilename = filepath.Join(manifestDir, "cloud-controller-uid-config.yml")
 )
@@ -76,7 +76,6 @@ func (i *Infrastructure) Generate(dependencies asset.Parents) error {
 			InfrastructureName:   clusterID.InfraID,
 			APIServerURL:         getAPIServerURL(installConfig.Config),
 			APIServerInternalURL: getInternalAPIServerURL(installConfig.Config),
-			EtcdDiscoveryDomain:  getEtcdDiscoveryDomain(installConfig.Config),
 			PlatformStatus:       &configv1.PlatformStatus{},
 		},
 	}
@@ -159,6 +158,12 @@ func (i *Infrastructure) Generate(dependencies asset.Parents) error {
 		config.Status.PlatformStatus.Ovirt = &configv1.OvirtPlatformStatus{
 			APIServerInternalIP: installConfig.Config.Ovirt.APIVIP,
 			IngressIP:           installConfig.Config.Ovirt.IngressVIP,
+		}
+	case kubevirt.Name:
+		config.Spec.PlatformSpec.Type = configv1.KubevirtPlatformType
+		config.Status.PlatformStatus.Kubevirt = &configv1.KubevirtPlatformStatus{
+			APIServerInternalIP: installConfig.Config.Kubevirt.APIVIP,
+			IngressIP:           installConfig.Config.Kubevirt.IngressVIP,
 		}
 	default:
 		config.Spec.PlatformSpec.Type = configv1.NonePlatformType

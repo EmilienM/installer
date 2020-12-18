@@ -18,12 +18,16 @@
       security_groups:
       - "{{ os_sg_master }}"
       allowed_address_pairs:
-      - ip_address: "{{ os_subnet_range | next_nth_usable(5) }}"
-      - ip_address: "{{ os_subnet_range | next_nth_usable(6) }}"
+      - ip_address: "{{ os_apiVIP }}"
 
   - name: 'Set bootstrap port tag'
     command:
       cmd: "openstack port set --tag {{ cluster_id_tag }} {{ os_port_bootstrap }}"
+
+  - name: 'Set bootstrap auto_ip to false'
+    ansible.builtin.set_fact:
+      bootstrap_auto_ip: false
+    when: os_bootstrap_fip is not defined
 
   - name: 'Create the bootstrap server'
     os_server:
@@ -31,14 +35,7 @@
       image: "{{ os_image_rhcos }}"
       flavor: "{{ os_flavor_master }}"
       userdata: "{{ lookup('file', os_bootstrap_ignition) | string }}"
-      auto_ip: no
+      floating_ips: "{{ os_bootstrap_fip | default(omit) }}"
+      auto_ip: "{{ bootstrap_auto_ip | default(omit) }}"
       nics:
       - port-name: "{{ os_port_bootstrap }}"
-
-  - name: 'Create the bootstrap floating IP'
-    os_floating_ip:
-      state: present
-      nat_destination: "{{ os_network }}"
-      network: "{{ os_external_network }}"
-      server: "{{ os_bootstrap_server_name }}"
-    when: os_external_network is defined and os_external_network|length>0

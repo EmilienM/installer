@@ -4,6 +4,7 @@ aliases:
   installer-approvers:
     - abhinavdahiya
     - crawford
+    - staebler
     - sdodson
     - smarterclayton
     - wking
@@ -19,16 +20,20 @@ aliases:
     - praveenkumar
     - cfergeau
   openstack-approvers:
+    - EmilienM
     - Fedosin
     - adduarte
     - iamemilio
     - mandre
+    - mdbooth
     - pierreprinetti
   openstack-reviewers:
+    - EmilienM
     - Fedosin
     - adduarte
     - iamemilio
     - mandre
+    - mdbooth
     - pierreprinetti
   vsphere-approvers:
     - dav1x
@@ -40,10 +45,12 @@ aliases:
     - jcpowermac
     - patrickdillon
   baremetal-approvers:
+    - dhellmann
     - hardys
     - stbenjam
   baremetal-reviewers:
     - celebdor
+    - dhellmann
     - markmc
     - russellb
     - hardys
@@ -72,11 +79,25 @@ aliases:
     - mjudeikis
   ovirt-approvers:
     - rgolangh
-    - dougsland
     - Gal-Zaidman
-    - gekorob
+    - eslutsky
+    - dougsland
+    - janoszen
   ovirt-reviewers:
-    - dougsland
-    - Gal-Zaidman
-    - gekorob
     - rgolangh
+    - Gal-Zaidman
+    - eslutsky
+    - dougsland
+    - janoszen
+  kubevirt-approvers:
+    - nirarg
+    - bardielle
+    - ravidbro
+    - rgolangh
+    - chenyosef
+  kubevirt-reviewers:
+    - nirarg
+    - bardielle
+    - ravidbro
+    - rgolangh
+    - chenyosef

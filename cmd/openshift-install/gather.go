@@ -29,6 +29,7 @@ import (
 	gatherazure "github.com/openshift/installer/pkg/terraform/gather/azure"
 	gatherbaremetal "github.com/openshift/installer/pkg/terraform/gather/baremetal"
 	gathergcp "github.com/openshift/installer/pkg/terraform/gather/gcp"
+	gatherkubevirt "github.com/openshift/installer/pkg/terraform/gather/kubevirt"
 	gatherlibvirt "github.com/openshift/installer/pkg/terraform/gather/libvirt"
 	gatheropenstack "github.com/openshift/installer/pkg/terraform/gather/openstack"
 	gatherovirt "github.com/openshift/installer/pkg/terraform/gather/ovirt"
@@ -38,6 +39,7 @@ import (
 	azuretypes "github.com/openshift/installer/pkg/types/azure"
 	baremetaltypes "github.com/openshift/installer/pkg/types/baremetal"
 	gcptypes "github.com/openshift/installer/pkg/types/gcp"
+	kubevirttypes "github.com/openshift/installer/pkg/types/kubevirt"
 	libvirttypes "github.com/openshift/installer/pkg/types/libvirt"
 	openstacktypes "github.com/openshift/installer/pkg/types/openstack"
 	ovirttypes "github.com/openshift/installer/pkg/types/ovirt"
@@ -237,6 +239,12 @@ func extractHostAddresses(config *types.InstallConfig, tfstate *terraform.State)
 		if err != nil {
 			logrus.Error(err)
 		}
+	case kubevirttypes.Name:
+		bootstrap, err := gatherkubevirt.BootstrapIP(tfstate)
+		if err != nil {
+			return bootstrap, port, masters, err
+		}
+		masters, err = gatherkubevirt.ControlPlaneIPs(tfstate)
 	default:
 		return "", port, nil, errUnSupportedGatherPlatform{Message: fmt.Sprintf("Cannot fetch the bootstrap and control plane host addresses from state file for %s platform", config.Platform.Name())}
 	}
@@ -265,7 +273,7 @@ func logClusterOperatorConditions(ctx context.Context, config *rest.Config) erro
 		return errors.Wrap(err, "creating a config client")
 	}
 
-	operators, err := client.ConfigV1().ClusterOperators().List(metav1.ListOptions{})
+	operators, err := client.ConfigV1().ClusterOperators().List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return errors.Wrap(err, "listing ClusterOperator objects")
 	}

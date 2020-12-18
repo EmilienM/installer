@@ -281,10 +281,40 @@ func TestValidateProvisioning(t *testing.T) {
 			expected: "Invalid value: \"noexist\": invalid external bridge",
 		},
 		{
+			name:     "valid_extbridge_mac",
+			platform: platform().ExternalMACAddress("CA:FE:CA:FE:CA:FE").build(),
+		},
+		{
 			name: "invalid_provbridge",
 			platform: platform().
 				ProvisioningBridge("noexist").build(),
 			expected: "Invalid value: \"noexist\": invalid provisioning bridge",
+		},
+		{
+			name:     "valid_provbridge_mac",
+			platform: platform().ProvisioningMACAddress("CA:FE:CA:FE:CA:FE").build(),
+		},
+		{
+			name: "invalid_duplicate_bridge_macs",
+			platform: platform().
+				ProvisioningMACAddress("CA:FE:CA:FE:CA:FE").
+				ExternalMACAddress("CA:FE:CA:FE:CA:FE").
+				build(),
+			expected: "Duplicate value: \"provisioning and external MAC addresses may not be identical\"",
+		},
+		{
+			name: "valid_both_macs_specified",
+			platform: platform().
+				ProvisioningMACAddress("CA:FE:CA:FE:CA:FD").
+				ExternalMACAddress("CA:FE:CA:FE:CA:FE").
+				build(),
+		},
+		{
+			name: "invalid_multicast_mac",
+			platform: platform().
+				ExternalMACAddress("7D:CE:E3:29:35:6F").
+				build(),
+			expected: "expected unicast mac address, found multicast",
 		},
 		{
 			name: "invalid_bootstrapprovip_wrongCIDR",
@@ -381,6 +411,14 @@ func TestValidateProvisioning(t *testing.T) {
 				ProvisioningNetwork(baremetal.DisabledProvisioningNetwork).
 				ClusterProvisioningIP("192.168.111.2").
 				BootstrapProvisioningIP("192.168.111.3").build(),
+		},
+		{
+			name:   "valid_provisioningDisabled_no_provisioning_ips",
+			config: installConfig().Network(networking().Network("192.168.111.0/24")).build(),
+			platform: platform().
+				ProvisioningNetwork(baremetal.DisabledProvisioningNetwork).
+				ClusterProvisioningIP("").
+				BootstrapProvisioningIP("").build(),
 		},
 		{
 			name:   "invalid_provisioningDisabled_IPs_not_in_machineCIDR",
@@ -568,8 +606,18 @@ func (pb *platformBuilder) ExternalBridge(value string) *platformBuilder {
 	return pb
 }
 
+func (pb *platformBuilder) ExternalMACAddress(value string) *platformBuilder {
+	pb.Platform.ExternalMACAddress = value
+	return pb
+}
+
 func (pb *platformBuilder) ProvisioningBridge(value string) *platformBuilder {
 	pb.Platform.ProvisioningBridge = value
+	return pb
+}
+
+func (pb *platformBuilder) ProvisioningMACAddress(value string) *platformBuilder {
+	pb.Platform.ProvisioningMACAddress = value
 	return pb
 }
 

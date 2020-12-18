@@ -72,7 +72,7 @@ module "topology" {
   external_network    = var.openstack_external_network
   external_network_id = var.openstack_external_network_id
   masters_count       = var.master_count
-  lb_floating_ip      = var.openstack_lb_floating_ip
+  api_floating_ip     = var.openstack_api_floating_ip
   ingress_floating_ip = var.openstack_ingress_floating_ip
   api_int_ip          = var.openstack_api_int_ip
   ingress_ip          = var.openstack_ingress_ip
@@ -81,6 +81,7 @@ module "topology" {
   octavia_support     = var.openstack_octavia_support
   machines_subnet_id  = var.openstack_machines_subnet_id
   machines_network_id = var.openstack_machines_network_id
+  master_extra_sg_ids = var.openstack_master_extra_sg_ids
 }
 
 data "openstack_images_image_v2" "base_image" {

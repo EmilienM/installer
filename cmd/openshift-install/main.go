@@ -12,6 +12,7 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/crypto/ssh/terminal"
 	"k8s.io/klog"
+	klogv2 "k8s.io/klog/v2"
 
 	"github.com/openshift/installer/pkg/terraform/exec/plugins"
 )
@@ -26,10 +27,16 @@ var (
 func main() {
 	// This attempts to configure klog (used by vendored Kubernetes code) not
 	// to log anything.
+	// Handle k8s.io/klog
 	var fs flag.FlagSet
 	klog.InitFlags(&fs)
 	fs.Set("stderrthreshold", "4")
 	klog.SetOutput(ioutil.Discard)
+	// Handle k8s.io/klog/v2
+	var fsv2 flag.FlagSet
+	klogv2.InitFlags(&fsv2)
+	fsv2.Set("stderrthreshold", "4")
+	klogv2.SetOutput(ioutil.Discard)
 
 	if len(os.Args) > 0 {
 		base := filepath.Base(os.Args[0])
@@ -88,7 +95,7 @@ func runRootCmd(cmd *cobra.Command, args []string) {
 		level = logrus.InfoLevel
 	}
 
-	logrus.AddHook(newFileHook(os.Stderr, level, &logrus.TextFormatter{
+	logrus.AddHook(newFileHookWithNewlineTruncate(os.Stderr, level, &logrus.TextFormatter{
 		// Setting ForceColors is necessary because logrus.TextFormatter determines
 		// whether or not to enable colors by looking at the output of the logger.
 		// In this case, the output is ioutil.Discard, which is not a terminal.
@@ -97,6 +104,7 @@ func runRootCmd(cmd *cobra.Command, args []string) {
 		ForceColors:            terminal.IsTerminal(int(os.Stderr.Fd())),
 		DisableTimestamp:       true,
 		DisableLevelTruncation: true,
+		DisableQuote:           true,
 	}))
 
 	if err != nil {

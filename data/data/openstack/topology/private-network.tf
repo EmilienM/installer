@@ -41,10 +41,13 @@ resource "openstack_networking_port_v2" "masters" {
   name  = "${var.cluster_id}-master-port-${count.index}"
   count = var.masters_count
 
-  admin_state_up     = "true"
-  network_id         = local.nodes_network_id
-  security_group_ids = [openstack_networking_secgroup_v2.master.id]
-  tags               = ["openshiftClusterID=${var.cluster_id}"]
+  admin_state_up = "true"
+  network_id     = local.nodes_network_id
+  security_group_ids = concat(
+    var.master_extra_sg_ids,
+    [openstack_networking_secgroup_v2.master.id],
+  )
+  tags = ["openshiftClusterID=${var.cluster_id}"]
 
   extra_dhcp_option {
     name  = "domain-search"
@@ -124,9 +127,9 @@ resource "openstack_networking_trunk_v2" "masters" {
 // as expected.
 
 resource "openstack_networking_floatingip_associate_v2" "api_fip" {
-  count       = length(var.lb_floating_ip) == 0 ? 0 : 1
+  count       = length(var.api_floating_ip) == 0 ? 0 : 1
   port_id     = openstack_networking_port_v2.api_port.id
-  floating_ip = var.lb_floating_ip
+  floating_ip = var.api_floating_ip
   depends_on  = [openstack_networking_router_interface_v2.nodes_router_interface]
 }
 

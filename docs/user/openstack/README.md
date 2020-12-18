@@ -25,6 +25,10 @@ In addition, it covers the installation with the default CNI (OpenShiftSDN), as 
     - [Initial Setup](#initial-setup)
     - [API Access](#api-access)
       - [Using Floating IPs](#using-floating-ips)
+        - [Create API and Ingress Floating IP Addresses](#create-api-and-ingress-floating-ip-addresses)
+        - [Create API and Ingress DNS Records](#create-api-and-ingress-dns-records)
+        - [External API Access](#external-api-access)
+        - [External Ingress (apps) Access](#external-ingress-apps-access)
       - [Without Floating IPs](#without-floating-ips)
     - [Running a Deployment](#running-a-deployment)
     - [Current Expected Behavior](#current-expected-behavior)
@@ -32,12 +36,15 @@ In addition, it covers the installation with the default CNI (OpenShiftSDN), as 
     - [Destroying The Cluster](#destroying-the-cluster)
   - [Post Install Operations](#post-install-operations)
     - [Adding a MachineSet](#adding-a-machineset)
-    - [Using an External Load Balancer](#using-an-external-load-balancer)
+      - [Using a Server Group](#using-a-server-group)
+      - [Setting Nova Availability Zones](#setting-nova-availability-zones)
+    - [Using a Custom External Load Balancer](#using-a-custom-external-load-balancer)
     - [Refreshing a CA Certificate](#refreshing-a-ca-certificate)
   - [Reporting Issues](#reporting-issues)
 
 ## Reference Documents
 
+- [Privileges](privileges.md)
 - [Known Issues and Workarounds](known-issues.md)
 - [Using the OSP 4 installer with Kuryr](kuryr.md)
 - [Troubleshooting your cluster](troubleshooting.md)
@@ -65,27 +72,31 @@ For a successful installation it is required:
 - Depending on the type of [image registry backend](#image-registry-requirements) either 1 Swift container or an additional 100 GB volume.
 - OpenStack resource tagging
 
+**NOTE:** The installer will check OpenStack quota limits to make sure that the requested resources can be created. Note that it won't check for resource availability in the cloud, but only on the quotas.
+
 You may need to increase the security group related quotas from their default values. For example (as an OpenStack administrator):
 
 ```sh
 openstack quota set --secgroups 8 --secgroup-rules 100 <project>`
 ```
 
+Once you configure the quota for your project, please ensure that the user for the installer has the proper [privileges](privileges.md).
+
 ### Master Nodes
 
-The default deployment stands up 3 master nodes, which is the minimum amount required for a cluster. For each master node you stand up, you will need 1 instance, and 1 port available in your quota. They should be assigned a flavor with at least 16 GB RAM, 4 vCPUs, and 25 GB Disk. It is theoretically possible to run with a smaller flavor, but be aware that if it takes too long to stand up services, or certain essential services crash, the installer could time out, leading to a failed install.
+The default deployment stands up 3 master nodes, which is the minimum amount required for a cluster. For each master node you stand up, you will need 1 instance, and 1 port available in your quota. They should be assigned a flavor with at least 16 GB RAM, 4 vCPUs, and 25 GB Disk (or Root Volume). It is theoretically possible to run with a smaller flavor, but be aware that if it takes too long to stand up services, or certain essential services crash, the installer could time out, leading to a failed install.
 
 The Master Nodes are placed in a single Server Group with "soft anti-affinity" policy; the machines will therefore be creted on separate hosts when possible.
 
 ### Worker Nodes
 
-The default deployment stands up 3 worker nodes. Worker nodes host the applications you run on OpenShift. The flavor assigned to the worker nodes should have at least 2 vCPUs, 8 GB RAM and 25 GB Disk. However, if you are experiencing `Out Of Memory` issues, or your installs are timing out, try increasing the size of your flavor to match the master nodes: 4 vCPUs and 16 GB RAM.
+The default deployment stands up 3 worker nodes. Worker nodes host the applications you run on OpenShift. The flavor assigned to the worker nodes should have at least 2 vCPUs, 8 GB RAM and 25 GB Disk (or Root Volume). However, if you are experiencing `Out Of Memory` issues, or your installs are timing out, try increasing the size of your flavor to match the master nodes: 4 vCPUs and 16 GB RAM.
 
 See the [OpenShift documentation](https://docs.openshift.com/container-platform/4.4/architecture/control-plane.html#defining-workers_control-plane) for more information on the worker nodes.
 
 ### Bootstrap Node
 
-The bootstrap node is a temporary node that is responsible for standing up the control plane on the masters. Only one bootstrap node will be stood up and it will be deprovisioned once the production control plane is ready. To do so, you need 1 instance, and 1 port. We recommend a flavor with a minimum of 16 GB RAM, 4 vCPUs, and 25 GB Disk.
+The bootstrap node is a temporary node that is responsible for standing up the control plane on the masters. Only one bootstrap node will be stood up and it will be deprovisioned once the production control plane is ready. To do so, you need 1 instance, and 1 port. We recommend a flavor with a minimum of 16 GB RAM, 4 vCPUs, and 25 GB Disk (or Root Volume).
 
 ### Image Registry Requirements
 
@@ -317,7 +328,7 @@ If you're unable to create and publish these DNS records, you can add them to yo
 
 ##### External API Access
 
-If you have specified the API floating IP (either via the installer prompt or by adding the `lbFloatingIP` entry in your `install-config.yaml`) the installer will attach the Floating IP address to the `api-port` automatically.
+If you have specified the API floating IP (either via the installer prompt or by adding the `apiFloatingIP` entry in your `install-config.yaml`) the installer will attach the Floating IP address to the `api-port` automatically.
 
 If you have created the API DNS record, you should be able access the OpenShift API.
 
@@ -433,7 +444,7 @@ rm -rf ostest/
 
 Groups of Compute nodes are managed using the [MachineSet][machine-set-code] resource. It is possible to create additional MachineSets post-install, for example to assign workloads to specific machines.
 
-When running on OpenStack, the MachineSet has platform-specific fields under `spec.template.spec.providerSpec.value`:
+When running on OpenStack, the MachineSet has platform-specific fields under `spec.template.spec.providerSpec.value`. For more information about the values that you can set in the `providerSpec`, see [the API definition](provider-spec-definition).
 
 ```yaml
 apiVersion: machine.openshift.io/v1beta1
@@ -490,6 +501,14 @@ spec:
           availabilityZone: <optional_openstack_availability_zone>
 ```
 
+[provider-spec-definition]: https://github.com/openshift/cluster-api-provider-openstack/blob/155384b859c5b2fb5b7f11c9111d3f8e4f3066bd/pkg/apis/openstackproviderconfig/v1alpha1/types.go#L31
+
+#### Defining a MachineSet That Uses Multiple Networks
+
+To define a MachineSet with multiple networks, the `primarySubnet` value in the `providerSpec` must be set to the OpenStack subnet that you want the Kubernetes endpoints of the nodes to be published on. For most use cases, this is the same subnet as the [machinesSubnet](./customization.md#cluster-scoped-properties) in the `install-config.yaml`.
+
+ After you set the subnet, add all of the networks that you want to attach to your machines to the `Networks` list in `providerSpec`. You must also add the network that the primary subnet is part of to this list.
+
 #### Using a Server Group
 
 In order to hint the Nova scheduler to spread the Machines across different
@@ -506,7 +525,7 @@ If the command is successful, the OpenStack CLI will return the ID of the newly
 created Server Group. Paste it in the optional `serverGroupID` property of the
 MachineSet.
 
-#### Deploying on Availability Zones
+#### Setting Nova Availability Zones
 
 In order to use Availability Zones, create one MachineSet per target
 Availability Zone, and set the Availability Zone in the `availabilityZone`
@@ -517,62 +536,62 @@ property of the MachineSet.
 [machine-set-code]: https://github.com/openshift/cluster-api-provider-openstack/blob/master/pkg/apis/openstackproviderconfig/v1alpha1/types.go
 [server-group-docs]: https://docs.openstack.org/api-ref/compute/?expanded=create-server-group-detail#create-server-group
 
-### Using an External Load Balancer
+### Using a Custom External Load Balancer
 
-This documents how to shift from the internal load balancer, which is intended for internal networking needs, to an external load balancer.
+You can shift ingress/egress traffic from the default OpenShift on OpenStack load balancer to a load balancer that you provide. To do so, the instance that it runs from must be able to access every machine in your cluster. You might ensure this access by creating the instance on a subnet that is within your cluster's network, and then attaching a router interface to that subnet from the `OpenShift-external-router` [object/instance/whatever]. This can also be accomplished by attaching floating ips to the machines you want to add to your load balancer.
 
-The load balancer must serve ports 6443, 443, and 80 to any users of the system.  Port 22623 is for serving ignition start-up configurations to the OpenShift nodes and should not be reachable outside of the cluster.
+#### External Facing OpenShift Services
 
-The first step is to add floating IPs to all the master nodes:
+Add the following external facing services to your new load balancer:
 
-```sh
-openstack floating ip create --port master-port-0 <public network>
-openstack floating ip create --port master-port-1 <public network>
-openstack floating ip create --port master-port-2 <public network>
+- The master nodes serve the OpenShift API on port 6443 using TCP.
+- The apps hosted on the worker nodes are served on ports 80, and 443. They are both served using TCP.
+
+Note: Make sure the instance that your new load balancer is running on has security group rules that allow TCP traffic over these ports.
+
+#### HAProxy Example Load Balancer Config
+
+The following `HAProxy` config file demonstrates a basic configuration for an external load balancer:
+
+```haproxy
+listen <cluster-name>-api-6443
+        bind 0.0.0.0:6443
+        mode tcp
+        balance roundrobin
+        server <cluster-name>-master-0 192.168.0.154:6443 check
+        server <cluster-name>-master-1 192.168.0.15:6443 check
+        server <cluster-name>-master-2 192.168.3.128:6443 check
+listen <cluster-name>-apps-443
+        bind 0.0.0.0:443
+        mode tcp
+        balance roundrobin
+        server <cluster-name>-worker-0 192.168.3.18:443 check
+        server <cluster-name>-worker-1 192.168.2.228:443 check
+        server <cluster-name>-worker-2 192.168.1.253:443 check
+listen <cluster-name>-apps-80
+        bind 0.0.0.0:80
+        mode tcp
+        balance roundrobin
+        server <cluster-name>-worker-0 192.168.3.18:80 check
+        server <cluster-name>-worker-1 192.168.2.228:80 check
+        server <cluster-name>-worker-2 192.168.1.253:80 check
 ```
 
-Once complete you can see your floating IPs using:
+#### DNS Lookups
 
-```sh
-openstack server list
-```
-
-These floating IPs can then be used by the load balancer to access the cluster.  An example of HAProxy configuration for port 6443 is below.
-
-```txt
-listen <cluster name>-api-6443
-    bind 0.0.0.0:6443
-    mode tcp
-    balance roundrobin
-    server <cluster name>-master-2 <floating ip>:6443 check
-    server <cluster name>-master-0 <floating ip>:6443 check
-    server <cluster name>-master-1 <floating ip>:6443 check
-```
-
-The other port configurations are identical.
-
-The next step is to allow network access from the load balancer network to the master nodes:
-
-```sh
-openstack security group rule create master --remote-ip <load balancer CIDR> --ingress --protocol tcp --dst-port 6443
-openstack security group rule create master --remote-ip <load balancer CIDR> --ingress --protocol tcp --dst-port 443
-openstack security group rule create master --remote-ip <load balancer CIDR> --ingress --protocol tcp --dst-port 80
-```
-
-You could also specify a specific IP address with /32 if you wish.
-
-You can verify the operation of the load balancer now if you wish, using the curl commands given below.
-
-Now the DNS entry for `api.<cluster name>.<base domain>` needs to be updated to point to the new load balancer:
+To ensure that your API and apps are accessible through your load balancer, [create or update your DNS entries](#create-api-and-ingress-dns-records) for those endpoints. To use your new load balancing service for external traffic, make sure the IP address for these DNS entries is the IP address your load balancer is reachable at.
 
 ```dns
 <load balancer ip> api.<cluster-name>.<base domain>
+<load balancer ip> apps.<cluster-name>.base domain>
 ```
 
-The external load balancer should now be operational along with your own DNS solution. The following curl command is an example of how to check functionality:
+#### Verifying that the API is Reachable
+
+One good way to test whether or not you can reach the API is to run the `oc` command. If you can't do that easily, you can use this curl command:
 
 ```sh
-curl https://<loadbalancer-ip>:6443/version --insecure
+curl https://api.<cluster-name>.<base domain>:6443/version --insecure
 ```
 
 Result:
@@ -580,21 +599,45 @@ Result:
 ```json
 {
   "major": "1",
-  "minor": "11+",
-  "gitVersion": "v1.11.0+ad103ed",
-  "gitCommit": "ad103ed",
+  "minor": "19",
+  "gitVersion": "v1.19.2+4abb4a7",
+  "gitCommit": "4abb4a77838037b8dbb8e4ca34e63c4a129654c8",
   "gitTreeState": "clean",
-  "buildDate": "2019-01-09T06:44:10Z",
-  "goVersion": "go1.10.3",
+  "buildDate": "2020-11-12T05:46:36Z",
+  "goVersion": "go1.15.2",
   "compiler": "gc",
   "platform": "linux/amd64"
 }
 ```
 
-Another useful thing to check is that the ignition configurations are only available from within the deployment. The following command should only succeed from a node in the OpenShift cluster:
+Note: The versions in the sample output may differ from your own. As long as you get a JSON payload response, the API is accessible.
+
+#### Verifying that Apps Reachable
+
+The simplest way to verify that apps are reachable is to open the OpenShift console in a web browser. If you don't have access to a web browser, query the console with the following curl command:
 
 ```sh
-curl https://<loadbalancer ip>:22623/config/master --insecure
+curl http://console-openshift-console.apps.<cluster-name>.<base domain> -I -L --insecure
+```
+
+
+Result:
+
+```http
+HTTP/1.1 302 Found
+content-length: 0
+location: https://console-openshift-console.apps.<cluster-name>.<base domain>/
+cache-control: no-cacheHTTP/1.1 200 OK
+referrer-policy: strict-origin-when-cross-origin
+set-cookie: csrf-token=39HoZgztDnzjJkq/JuLJMeoKNXlfiVv2YgZc09c3TBOBU4NI6kDXaJH1LdicNhN1UsQWzon4Dor9GWGfopaTEQ==; Path=/; Secure
+x-content-type-options: nosniff
+x-dns-prefetch-control: off
+x-frame-options: DENY
+x-xss-protection: 1; mode=block
+date: Tue, 17 Nov 2020 08:42:10 GMT
+content-type: text/html; charset=utf-8
+set-cookie: 1e2670d92730b515ce3a1bb65da45062=9b714eb87e93cf34853e87a92d6894be; path=/; HttpOnly; Secure; SameSite=None
+cache-control: private
 ```
 
 ### Refreshing a CA Certificate

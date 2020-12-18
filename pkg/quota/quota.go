@@ -15,6 +15,8 @@ type Quota struct {
 
 	InUse int64
 	Limit int64
+
+	Unlimited bool
 }
 
 // Constraint defines a check against availablity
@@ -79,9 +81,16 @@ func Check(quotas []Quota, checks []Constraint) ([]ConstraintReport, error) {
 			continue
 		}
 
+		if matched.Unlimited {
+			report.Result = Available
+			report.Message = "Unlimited quota found for the constraint"
+			reports = append(reports, report)
+			continue
+		}
+
 		if check.Count > matched.Limit {
 			report.Result = NotAvailable
-			report.Message = fmt.Sprintf("The required number of resources (%d) is more than the limit of %d", check.Count, matched.Limit)
+			report.Message = fmt.Sprintf("the required number of resources (%d) is more than the limit of %d", check.Count, matched.Limit)
 			reports = append(reports, report)
 			continue
 		}
@@ -91,18 +100,18 @@ func Check(quotas []Quota, checks []Constraint) ([]ConstraintReport, error) {
 		headroom := int64(math.Ceil(0.2 * float64(matched.Limit)))
 		if check.Count > avail {
 			report.Result = NotAvailable
-			report.Message = fmt.Sprintf("The required number of resources (%d) is more than remaining quota of %d", check.Count, avail)
+			report.Message = fmt.Sprintf("the required number of resources (%d) is more than remaining quota of %d", check.Count, avail)
 			reports = append(reports, report)
 			continue
 		}
 		if availAfterUse <= headroom {
 			report.Result = AvailableButLow
-			report.Message = fmt.Sprintf("The required number of resources is available but only %d will be leftover", availAfterUse)
+			report.Message = fmt.Sprintf("the required number of resources is available but only %d will be leftover", availAfterUse)
 			reports = append(reports, report)
 			continue
 		}
 		report.Result = Available
-		report.Message = "The required number of resources is available"
+		report.Message = "the required number of resources is available"
 		reports = append(reports, report)
 	}
 

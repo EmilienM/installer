@@ -2,7 +2,9 @@ package bootstrap
 
 import (
 	"bytes"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -11,6 +13,7 @@ import (
 	"path/filepath"
 	"strings"
 	"text/template"
+	"time"
 
 	"github.com/containers/image/pkg/sysregistriesv2"
 	ignutil "github.com/coreos/ignition/v2/config/util"
@@ -18,12 +21,14 @@ import (
 	configv1 "github.com/openshift/api/config/v1"
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
+	"github.com/vincent-petithory/dataurl"
 
 	"github.com/openshift/installer/data"
 	"github.com/openshift/installer/pkg/asset"
 	"github.com/openshift/installer/pkg/asset/ignition"
 	"github.com/openshift/installer/pkg/asset/ignition/bootstrap/baremetal"
 	"github.com/openshift/installer/pkg/asset/ignition/bootstrap/vsphere"
+	mcign "github.com/openshift/installer/pkg/asset/ignition/machine"
 	"github.com/openshift/installer/pkg/asset/installconfig"
 	"github.com/openshift/installer/pkg/asset/kubeconfig"
 	"github.com/openshift/installer/pkg/asset/machines"
@@ -39,7 +44,6 @@ import (
 const (
 	rootDir              = "/opt/openshift"
 	bootstrapIgnFilename = "bootstrap.ign"
-	ignitionUser         = "core"
 )
 
 // bootstrapTemplateData is the data to use to replace values in bootstrap
@@ -50,10 +54,10 @@ type bootstrapTemplateData struct {
 	EtcdCluster           string
 	PullSecret            string
 	ReleaseImage          string
+	ClusterProfile        string
 	Proxy                 *configv1.ProxyStatus
 	Registries            []sysregistriesv2.Registry
 	BootImage             string
-	ClusterDomain         string
 	PlatformData          platformTemplateData
 }
 
@@ -75,10 +79,13 @@ var _ asset.WritableAsset = (*Bootstrap)(nil)
 // Dependencies returns the assets on which the Bootstrap asset depends.
 func (a *Bootstrap) Dependencies() []asset.Asset {
 	return []asset.Asset{
+		&baremetal.IronicCreds{},
 		&installconfig.InstallConfig{},
 		&kubeconfig.AdminInternalClient{},
 		&kubeconfig.Kubelet{},
 		&kubeconfig.LoopbackClient{},
+		&mcign.MasterIgnitionCustomizations{},
+		&mcign.WorkerIgnitionCustomizations{},
 		&machines.Master{},
 		&machines.Worker{},
 		&manifests.Manifests{},
@@ -91,6 +98,8 @@ func (a *Bootstrap) Dependencies() []asset.Asset {
 		&tls.AggregatorSignerCertKey{},
 		&tls.APIServerProxyCertKey{},
 		&tls.BootstrapSSHKeyPair{},
+		&tls.BoundSASigningKey{},
+		&tls.CloudProviderCABundle{},
 		&tls.EtcdCABundle{},
 		&tls.EtcdMetricCABundle{},
 		&tls.EtcdMetricSignerCertKey{},
@@ -137,9 +146,10 @@ func (a *Bootstrap) Generate(dependencies asset.Parents) error {
 	releaseImage := &releaseimage.Image{}
 	rhcosImage := new(rhcos.Image)
 	bootstrapSSHKeyPair := &tls.BootstrapSSHKeyPair{}
-	dependencies.Get(installConfig, proxy, releaseImage, rhcosImage, bootstrapSSHKeyPair)
+	ironicCreds := &baremetal.IronicCreds{}
+	dependencies.Get(installConfig, proxy, releaseImage, rhcosImage, bootstrapSSHKeyPair, ironicCreds)
 
-	templateData, err := a.getTemplateData(installConfig.Config, releaseImage.PullSpec, installConfig.Config.ImageContentSources, proxy.Config, rhcosImage)
+	templateData, err := a.getTemplateData(installConfig.Config, releaseImage.PullSpec, installConfig.Config.ImageContentSources, proxy.Config, rhcosImage, ironicCreds)
 
 	if err != nil {
 		return errors.Wrap(err, "failed to get bootstrap templates")
@@ -218,7 +228,7 @@ func (a *Bootstrap) Files() []*asset.File {
 }
 
 // getTemplateData returns the data to use to execute bootstrap templates.
-func (a *Bootstrap) getTemplateData(installConfig *types.InstallConfig, releaseImage string, imageSources []types.ImageContentSource, proxy *configv1.Proxy, rhcosImage *rhcos.Image) (*bootstrapTemplateData, error) {
+func (a *Bootstrap) getTemplateData(installConfig *types.InstallConfig, releaseImage string, imageSources []types.ImageContentSource, proxy *configv1.Proxy, rhcosImage *rhcos.Image, ironicCreds *baremetal.IronicCreds) (*bootstrapTemplateData, error) {
 	etcdEndpoints := make([]string, *installConfig.ControlPlane.Replicas)
 
 	for i := range etcdEndpoints {
@@ -245,9 +255,16 @@ func (a *Bootstrap) getTemplateData(installConfig *types.InstallConfig, releaseI
 
 	switch installConfig.Platform.Name() {
 	case baremetaltypes.Name:
-		platformData.BareMetal = baremetal.GetTemplateData(installConfig.Platform.BareMetal, installConfig.MachineNetwork)
+		platformData.BareMetal = baremetal.GetTemplateData(installConfig.Platform.BareMetal, installConfig.MachineNetwork, ironicCreds.Username, ironicCreds.Password)
 	case vspheretypes.Name:
 		platformData.VSphere = vsphere.GetTemplateData(installConfig.Platform.VSphere)
+	}
+
+	// Set cluster profile
+	clusterProfile := ""
+	if cp := os.Getenv("OPENSHIFT_INSTALL_EXPERIMENTAL_CLUSTER_PROFILE"); cp != "" {
+		logrus.Warnf("Found override for Cluster Profile: %q", cp)
+		clusterProfile = cp
 	}
 
 	return &bootstrapTemplateData{
@@ -259,8 +276,8 @@ func (a *Bootstrap) getTemplateData(installConfig *types.InstallConfig, releaseI
 		Proxy:                 &proxy.Status,
 		Registries:            registries,
 		BootImage:             string(*rhcosImage),
-		ClusterDomain:         installConfig.ClusterDomain(),
 		PlatformData:          platformData,
+		ClusterProfile:        clusterProfile,
 	}, nil
 }
 
@@ -456,6 +473,8 @@ func (a *Bootstrap) addParentFiles(dependencies asset.Parents) {
 		&manifests.Openshift{},
 		&machines.Master{},
 		&machines.Worker{},
+		&mcign.MasterIgnitionCustomizations{},
+		&mcign.WorkerIgnitionCustomizations{},
 	} {
 		dependencies.Get(asset)
 
@@ -476,6 +495,8 @@ func (a *Bootstrap) addParentFiles(dependencies asset.Parents) {
 		&tls.AggregatorClientCertKey{},
 		&tls.AggregatorSignerCertKey{},
 		&tls.APIServerProxyCertKey{},
+		&tls.BoundSASigningKey{},
+		&tls.CloudProviderCABundle{},
 		&tls.EtcdCABundle{},
 		&tls.EtcdMetricCABundle{},
 		&tls.EtcdMetricSignerCertKey{},
@@ -558,5 +579,45 @@ func (a *Bootstrap) Load(f asset.FileFetcher) (found bool, err error) {
 	}
 
 	a.File, a.Config = file, config
+	warnIfCertificatesExpired(a.Config)
 	return true, nil
+}
+
+// warnIfCertificatesExpired checks for expired certificates and warns if so
+func warnIfCertificatesExpired(config *igntypes.Config) {
+	expiredCerts := 0
+	for _, file := range config.Storage.Files {
+		if filepath.Ext(file.Path) == ".crt" && file.Contents.Source != nil {
+			fileName := path.Base(file.Path)
+			decoded, err := dataurl.DecodeString(*file.Contents.Source)
+			if err != nil {
+				logrus.Debugf("Unable to decode certificate %s: %s", fileName, err.Error())
+				continue
+			}
+			data := decoded.Data
+			for {
+				block, rest := pem.Decode(data)
+				if block == nil {
+					break
+				}
+
+				cert, err := x509.ParseCertificate(block.Bytes)
+				if err == nil {
+					if time.Now().UTC().After(cert.NotAfter) {
+						logrus.Warnf("Bootstrap Ignition-Config Certificate %s expired at %s.", path.Base(file.Path), cert.NotAfter.Format(time.RFC3339))
+						expiredCerts++
+					}
+				} else {
+					logrus.Debugf("Unable to parse certificate %s: %s", fileName, err.Error())
+					break
+				}
+
+				data = rest
+			}
+		}
+	}
+
+	if expiredCerts > 0 {
+		logrus.Warnf("Bootstrap Ignition-Config: %d certificates expired. Installation attempts with the created Ignition-Configs will possibly fail.", expiredCerts)
+	}
 }

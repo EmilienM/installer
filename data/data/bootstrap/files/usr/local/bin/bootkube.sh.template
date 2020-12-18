@@ -55,6 +55,9 @@ then
 
 	bootkube_podman_run \
 		--volume "$PWD:/assets:z" \
+{{- if .ClusterProfile}}
+		--env CLUSTER_PROFILE="{{.ClusterProfile}}" \
+{{- end}}
 		"${RELEASE_IMAGE_DIGEST}" \
 		render \
 			--output-dir=/assets/cvo-bootstrap \
@@ -79,7 +82,6 @@ then
 		--etcd-ca=/assets/tls/etcd-ca-bundle.crt \
 		--etcd-ca-key=/assets/tls/etcd-signer.key \
 		--manifest-etcd-image="${MACHINE_CONFIG_ETCD_IMAGE}" \
-		--etcd-discovery-domain={{.ClusterDomain}} \
 		--manifest-cluster-etcd-operator-image="${CLUSTER_ETCD_OPERATOR_IMAGE}" \
 		--asset-input-dir=/assets/tls \
 		--asset-output-dir=/assets/etcd-bootstrap \
@@ -141,7 +143,8 @@ then
 		--asset-input-dir=/assets/tls \
 		--asset-output-dir=/assets/kube-apiserver-bootstrap \
 		--config-output-file=/assets/kube-apiserver-bootstrap/config \
-		--cluster-config-file=/assets/manifests/cluster-network-02-config.yml
+		--cluster-config-file=/assets/manifests/cluster-network-02-config.yml \
+		--cluster-auth-file=/assets/manifests/cluster-authentication-02-config.yaml
 
 	cp kube-apiserver-bootstrap/config /etc/kubernetes/bootstrap-configs/kube-apiserver-config.yaml
 	cp kube-apiserver-bootstrap/bootstrap-manifests/* bootstrap-manifests/
@@ -276,6 +279,7 @@ then
 	copy_static_resources_for openstack
 	copy_static_resources_for ovirt
 	copy_static_resources_for vsphere
+	copy_static_resources_for kubevirt
 
 	cp mco-bootstrap/manifests/* manifests/
 

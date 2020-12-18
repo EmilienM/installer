@@ -5,7 +5,7 @@ import (
 	"net"
 	"testing"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2019-07-01/compute"
+	azsku "github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-10-01/compute"
 	aznetwork "github.com/Azure/azure-sdk-for-go/services/network/mgmt/2018-12-01/network"
 	azres "github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2019-05-01/resources"
 	azsubs "github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2019-06-01/subscriptions"
@@ -35,7 +35,34 @@ var (
 	validResourceGroupNamespace    = "Microsoft.Resources"
 	validResourceGroupResourceType = "resourceGroups"
 	validResourceSkuRegions        = "southeastasia"
-	validDiskSkuType               = "UltraSSD_LRS"
+
+	instanceTypeSku = []*azsku.ResourceSku{
+		{Name: to.StringPtr("Standard_A1_v2"), Capabilities: &[]azsku.ResourceSkuCapabilities{{Name: to.StringPtr("vCPUs"), Value: to.StringPtr("1")}, {Name: to.StringPtr("MemoryGB"), Value: to.StringPtr("2")}}},
+		{Name: to.StringPtr("Standard_D2_v4"), Capabilities: &[]azsku.ResourceSkuCapabilities{{Name: to.StringPtr("vCPUs"), Value: to.StringPtr("2")}, {Name: to.StringPtr("MemoryGB"), Value: to.StringPtr("8")}}},
+		{Name: to.StringPtr("Standard_D4_v4"), Capabilities: &[]azsku.ResourceSkuCapabilities{{Name: to.StringPtr("vCPUs"), Value: to.StringPtr("4")}, {Name: to.StringPtr("MemoryGB"), Value: to.StringPtr("16")}}},
+	}
+
+	validInstanceTypes = func(ic *types.InstallConfig) {
+		ic.Platform.Azure.DefaultMachinePlatform.InstanceType = "Standard_D2_v4"
+		ic.ControlPlane.Platform.Azure.InstanceType = "Standard_D4_v4"
+		ic.Compute[0].Platform.Azure.InstanceType = "Standard_D2_v4"
+	}
+
+	invalidateDefaultInstanceTypes = func(ic *types.InstallConfig) {
+		ic.Platform.Azure.DefaultMachinePlatform.InstanceType = "Standard_A1_v2"
+	}
+
+	invalidateControlPlaneInstanceTypes = func(ic *types.InstallConfig) {
+		ic.ControlPlane.Platform.Azure.InstanceType = "Standard_A1_v2"
+	}
+
+	invalidateComputeInstanceTypes = func(ic *types.InstallConfig) {
+		ic.Compute[0].Platform.Azure.InstanceType = "Standard_A1_v2"
+	}
+
+	undefinedDefaultInstanceTypes = func(ic *types.InstallConfig) {
+		ic.Platform.Azure.DefaultMachinePlatform.InstanceType = "Dne_D2_v4"
+	}
 
 	invalidateMachineCIDR = func(ic *types.InstallConfig) {
 		_, newCidr, _ := net.ParseCIDR("192.168.111.0/24")
@@ -44,11 +71,7 @@ var (
 		}
 	}
 	invalidResourceSkuRegion = "centralus"
-	invalidDiskType          = "LRS"
 
-	invalidateNetworkResourceGroup = func(ic *types.InstallConfig) {
-		ic.Azure.NetworkResourceGroupName = "invalid-network-resource-group"
-	}
 	invalidateVirtualNetwork     = func(ic *types.InstallConfig) { ic.Azure.VirtualNetwork = "invalid-virtual-network" }
 	invalidateComputeSubnet      = func(ic *types.InstallConfig) { ic.Azure.ComputeSubnet = "invalid-compute-subnet" }
 	invalidateControlPlaneSubnet = func(ic *types.InstallConfig) { ic.Azure.ControlPlaneSubnet = "invalid-controlplane-subnet" }
@@ -57,9 +80,6 @@ var (
 	invalidateRegionLetterCase   = func(ic *types.InstallConfig) { ic.Azure.Region = "Central US" }
 	removeVirtualNetwork         = func(ic *types.InstallConfig) { ic.Azure.VirtualNetwork = "" }
 	removeSubnets                = func(ic *types.InstallConfig) { ic.Azure.ComputeSubnet, ic.Azure.ControlPlaneSubnet = "", "" }
-	invalidateDiskType           = func(ic *types.InstallConfig) { ic.Azure.DefaultMachinePlatform.OSDisk.DiskType = invalidDiskType }
-	invalidateRegionForDiskType  = func(ic *types.InstallConfig) { ic.Azure.Region = invalidResourceSkuRegion }
-	validResourceSkuDisk         = func(ic *types.InstallConfig) { ic.Azure.DefaultMachinePlatform.OSDisk.DiskType = validDiskSkuType }
 
 	virtualNetworkAPIResult = &aznetwork.VirtualNetwork{
 		Name: &validVirtualNetwork,
@@ -95,9 +115,6 @@ var (
 			},
 		},
 	}
-	validateResourceSkuResult = &compute.ResourceSku{
-		Name: to.StringPtr("UltraSSD_LRS"),
-	}
 )
 
 func validInstallConfig() *types.InstallConfig {
@@ -117,6 +134,16 @@ func validInstallConfig() *types.InstallConfig {
 				DefaultMachinePlatform:   &azure.MachinePool{},
 			},
 		},
+		ControlPlane: &types.MachinePool{
+			Platform: types.MachinePoolPlatform{
+				Azure: &azure.MachinePool{},
+			},
+		},
+		Compute: []types.MachinePool{{
+			Platform: types.MachinePoolPlatform{
+				Azure: &azure.MachinePool{},
+			},
+		}},
 	}
 }
 
@@ -162,6 +189,31 @@ func TestAzureInstallConfigValidation(t *testing.T) {
 			errorMsg: "failed to retrieve compute subnet",
 		},
 		{
+			name:     "Valid instance types",
+			edits:    editFunctions{validInstanceTypes},
+			errorMsg: "",
+		},
+		{
+			name:     "Invalid default machine type",
+			edits:    editFunctions{invalidateDefaultInstanceTypes},
+			errorMsg: `\[platform.azure.defaultMachinePlatform.type: Invalid value: "Standard_A1_v2": instance type does not meet minimum resource requirements of 4 vCPUs, platform.azure.defaultMachinePlatform.type: Invalid value: "Standard_A1_v2": instance type does not meet minimum resource requirements of 16 GB Memory\]`,
+		},
+		{
+			name:     "Invalid control plane instance types",
+			edits:    editFunctions{invalidateControlPlaneInstanceTypes},
+			errorMsg: `[controlPlane.platform.azure.type: Invalid value: "n1\-standard\-1": instance type does not meet minimum resource requirements of 4 vCPUs, controlPlane.platform.azure.type: Invalid value: "n1\-standard\-1": instance type does not meet minimum resource requirements of 16 GB Memory]`,
+		},
+		{
+			name:     "Invalid compute instance types",
+			edits:    editFunctions{invalidateComputeInstanceTypes},
+			errorMsg: `\[compute\[0\].platform.azure.type: Invalid value: "Standard_A1_v2": instance type does not meet minimum resource requirements of 2 vCPUs, compute\[0\].platform.azure.type: Invalid value: "Standard_A1_v2": instance type does not meet minimum resource requirements of 8 GB Memory\]`,
+		},
+		{
+			name:     "Undefined default instance types",
+			edits:    editFunctions{undefinedDefaultInstanceTypes},
+			errorMsg: `platform.azure.defaultMachinePlatform.type: Invalid value: "Dne_D2_v4": not found in region`,
+		},
+		{
 			name:     "Invalid region",
 			edits:    editFunctions{invalidateRegion},
 			errorMsg: "region \"neverland\" is not valid or not available for this account$",
@@ -182,6 +234,12 @@ func TestAzureInstallConfigValidation(t *testing.T) {
 	defer mockCtrl.Finish()
 
 	azureClient := mock.NewMockAPI(mockCtrl)
+
+	// InstanceType
+	for _, value := range instanceTypeSku {
+		azureClient.EXPECT().GetVirtualMachineSku(gomock.Any(), to.String(value.Name), gomock.Any()).Return(value, nil).AnyTimes()
+	}
+	azureClient.EXPECT().GetVirtualMachineSku(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil).AnyTimes()
 
 	// VirtualNetwork
 	azureClient.EXPECT().GetVirtualNetwork(gomock.Any(), validNetworkResourceGroup, validVirtualNetwork).Return(virtualNetworkAPIResult, nil).AnyTimes()

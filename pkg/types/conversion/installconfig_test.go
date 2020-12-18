@@ -8,6 +8,8 @@ import (
 
 	"github.com/openshift/installer/pkg/ipnet"
 	"github.com/openshift/installer/pkg/types"
+	"github.com/openshift/installer/pkg/types/baremetal"
+	"github.com/openshift/installer/pkg/types/openstack"
 )
 
 func TestConvertInstallConfig(t *testing.T) {
@@ -165,6 +167,153 @@ func TestConvertInstallConfig(t *testing.T) {
 					NetworkType: "OpenShiftSDN",
 				},
 			},
+		},
+		{
+			name: "deprecated OpenStack LbFloatingIP",
+			config: &types.InstallConfig{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: types.InstallConfigVersion,
+				},
+				Platform: types.Platform{
+					OpenStack: &openstack.Platform{
+						DeprecatedLbFloatingIP: "10.0.109.1",
+					},
+				},
+			},
+			expected: &types.InstallConfig{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: types.InstallConfigVersion,
+				},
+				Platform: types.Platform{
+					OpenStack: &openstack.Platform{
+						DeprecatedLbFloatingIP: "10.0.109.1",
+						APIFloatingIP:          "10.0.109.1",
+					},
+				},
+			},
+		},
+		{
+			name: "deprecated OpenStack LbFloatingIP with APIFloatingIP",
+			config: &types.InstallConfig{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: types.InstallConfigVersion,
+				},
+				Platform: types.Platform{
+					OpenStack: &openstack.Platform{
+						DeprecatedLbFloatingIP: "10.0.109.1",
+						APIFloatingIP:          "10.0.109.1",
+					},
+				},
+			},
+			expectedError: "cannot specify lbFloatingIP and apiFloatingIP together",
+		},
+
+		// BareMetal platform conversions
+		{
+			name: "baremetal external DHCP",
+			config: &types.InstallConfig{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: types.InstallConfigVersion,
+				},
+				Platform: types.Platform{
+					BareMetal: &baremetal.Platform{
+						DeprecatedProvisioningDHCPExternal: true,
+					},
+				},
+			},
+			expected: &types.InstallConfig{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: types.InstallConfigVersion,
+				},
+				Platform: types.Platform{
+					BareMetal: &baremetal.Platform{
+						DeprecatedProvisioningDHCPExternal: true,
+						ProvisioningNetwork:                "Unmanaged",
+					},
+				},
+			},
+		},
+		{
+			name: "baremetal provisioningHostIP -> clusterProvisioningIP",
+			config: &types.InstallConfig{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: types.InstallConfigVersion,
+				},
+				Platform: types.Platform{
+					BareMetal: &baremetal.Platform{
+						DeprecatedProvisioningHostIP: "172.22.0.3",
+					},
+				},
+			},
+			expected: &types.InstallConfig{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: types.InstallConfigVersion,
+				},
+				Platform: types.Platform{
+					BareMetal: &baremetal.Platform{
+						ClusterProvisioningIP:        "172.22.0.3",
+						DeprecatedProvisioningHostIP: "172.22.0.3",
+					},
+				},
+			},
+		},
+		{
+			name: "baremetal provisioningHostIP mismatch clusterProvisioningIP",
+			config: &types.InstallConfig{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: types.InstallConfigVersion,
+				},
+				Platform: types.Platform{
+					BareMetal: &baremetal.Platform{
+						ClusterProvisioningIP:        "172.22.0.4",
+						DeprecatedProvisioningHostIP: "172.22.0.3",
+					},
+				},
+			},
+			expectedError: "provisioningHostIP is deprecated; only clusterProvisioningIP needs to be specified",
+		},
+		{
+			name: "deprecated OpenStack computeFlavor",
+			config: &types.InstallConfig{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: types.InstallConfigVersion,
+				},
+				Platform: types.Platform{
+					OpenStack: &openstack.Platform{
+						DeprecatedFlavorName: "big-flavor",
+					},
+				},
+			},
+			expected: &types.InstallConfig{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: types.InstallConfigVersion,
+				},
+				Platform: types.Platform{
+					OpenStack: &openstack.Platform{
+						DeprecatedFlavorName: "big-flavor",
+						DefaultMachinePlatform: &openstack.MachinePool{
+							FlavorName: "big-flavor",
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "deprecated OpenStack computeFlavor with type in defaultMachinePlatform",
+			config: &types.InstallConfig{
+				TypeMeta: metav1.TypeMeta{
+					APIVersion: types.InstallConfigVersion,
+				},
+				Platform: types.Platform{
+					OpenStack: &openstack.Platform{
+						DeprecatedFlavorName: "flavor1",
+						DefaultMachinePlatform: &openstack.MachinePool{
+							FlavorName: "flavor2",
+						},
+					},
+				},
+			},
+			expectedError: "cannot specify computeFlavor and type in defaultMachinePlatform together",
 		},
 	}
 

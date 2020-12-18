@@ -43,7 +43,7 @@ func Platform() (*openstack.Platform, error) {
 		},
 	}, &cloud)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed UserInput")
 	}
 
 	// We should unset OS_CLOUD env variable here, because the real cloud name was defined
@@ -51,7 +51,7 @@ func Platform() (*openstack.Platform, error) {
 	// will be ignored if OS_CLOUD contains something.
 	os.Unsetenv("OS_CLOUD")
 
-	networkNames, err := getNetworkNames(cloud)
+	networkNames, err := getExternalNetworkNames(cloud)
 	if err != nil {
 		return nil, err
 	}
@@ -80,10 +80,10 @@ func Platform() (*openstack.Platform, error) {
 		extNet = ""
 	}
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed UserInput")
 	}
 
-	var lbFloatingIP string
+	var apiFloatingIP string
 	if extNet != "" {
 		floatingIPNames, err := getFloatingIPNames(cloud, extNet)
 		if err != nil {
@@ -106,9 +106,9 @@ func Platform() (*openstack.Platform, error) {
 					return nil
 				}),
 			},
-		}, &lbFloatingIP)
+		}, &apiFloatingIP)
 		if err != nil {
-			return nil, err
+			return nil, errors.Wrap(err, "failed UserInput")
 		}
 	}
 
@@ -136,13 +136,15 @@ func Platform() (*openstack.Platform, error) {
 		},
 	}, &flavor)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, "failed UserInput")
 	}
 
 	return &openstack.Platform{
+		APIFloatingIP:   apiFloatingIP,
 		Cloud:           cloud,
 		ExternalNetwork: extNet,
-		FlavorName:      flavor,
-		LbFloatingIP:    lbFloatingIP,
+		DefaultMachinePlatform: &openstack.MachinePool{
+			FlavorName: flavor,
+		},
 	}, nil
 }

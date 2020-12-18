@@ -24,6 +24,8 @@ import (
 	baremetalvalidation "github.com/openshift/installer/pkg/types/baremetal/validation"
 	"github.com/openshift/installer/pkg/types/gcp"
 	gcpvalidation "github.com/openshift/installer/pkg/types/gcp/validation"
+	"github.com/openshift/installer/pkg/types/kubevirt"
+	kubevirtvalidation "github.com/openshift/installer/pkg/types/kubevirt/validation"
 	"github.com/openshift/installer/pkg/types/libvirt"
 	libvirtvalidation "github.com/openshift/installer/pkg/types/libvirt/validation"
 	"github.com/openshift/installer/pkg/types/openstack"
@@ -441,6 +443,11 @@ func validatePlatform(platform *types.Platform, fldPath *field.Path, network *ty
 			return ovirtvalidation.ValidatePlatform(platform.Ovirt, f)
 		})
 	}
+	if platform.Kubevirt != nil {
+		validate(kubevirt.Name, platform.Kubevirt, func(f *field.Path) field.ErrorList {
+			return kubevirtvalidation.ValidatePlatform(platform.Kubevirt, f, c)
+		})
+	}
 	return allErrs
 }
 
@@ -528,8 +535,8 @@ func validateCloudCredentialsMode(mode types.CredentialsMode, fldPath *field.Pat
 	// for the platform. If a platform name is not in the map, then the credentials mode cannot be set for that platform.
 	validPlatformCredentialsModes := map[string][]types.CredentialsMode{
 		aws.Name:   {types.MintCredentialsMode, types.PassthroughCredentialsMode, types.ManualCredentialsMode},
-		azure.Name: {types.MintCredentialsMode, types.PassthroughCredentialsMode},
-		gcp.Name:   {types.MintCredentialsMode, types.PassthroughCredentialsMode},
+		azure.Name: {types.MintCredentialsMode, types.PassthroughCredentialsMode, types.ManualCredentialsMode},
+		gcp.Name:   {types.MintCredentialsMode, types.PassthroughCredentialsMode, types.ManualCredentialsMode},
 	}
 	if validModes, ok := validPlatformCredentialsModes[platform]; ok {
 		validModesSet := sets.NewString()

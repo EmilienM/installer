@@ -1,6 +1,7 @@
 package openstack
 
 import (
+	"os"
 	"strings"
 	"time"
 
@@ -104,6 +105,11 @@ func (o *ClusterUninstaller) Run() error {
 		Cloud: o.Cloud,
 	}
 
+	// We should unset OS_CLOUD env variable here, because the real cloud name was
+	// defined on the previous step. OS_CLOUD has more priority, so the value from
+	// "opts" variable will be ignored if OS_CLOUD contains something.
+	os.Unsetenv("OS_CLOUD")
+
 	// launch goroutines
 	for name, function := range deleteFuncs {
 		go deleteRunner(name, function, opts, o.Filter, o.Logger, returnChannel)
@@ -116,10 +122,8 @@ func (o *ClusterUninstaller) Run() error {
 
 	// wait for them to finish
 	for i := 0; i < len(deleteFuncs); i++ {
-		select {
-		case res := <-returnChannel:
-			o.Logger.Debugf("goroutine %v complete", res)
-		}
+		res := <-returnChannel
+		o.Logger.Debugf("goroutine %v complete", res)
 	}
 
 	// we need to untag the custom network if it was provided by the user
@@ -148,7 +152,6 @@ func deleteRunner(deleteFuncName string, dFunction deleteFunc, opts *clientconfi
 
 	// record that the goroutine has run to completion
 	channel <- deleteFuncName
-	return
 }
 
 // filterObjects will do client-side filtering given an appropriately filled out

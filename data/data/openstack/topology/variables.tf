@@ -23,8 +23,8 @@ variable "external_network_id" {
   default     = ""
 }
 
-variable "lb_floating_ip" {
-  description = "(optional) Existing floating IP address to attach to the load balancer created by the installer."
+variable "api_floating_ip" {
+  description = "(optional) Existing floating IP address to attach to the OpenShift API created by the installer."
   type        = string
   default     = ""
 }
@@ -67,4 +67,9 @@ variable "machines_subnet_id" {
 variable "machines_network_id" {
   type    = string
   default = ""
+}
+
+variable "master_extra_sg_ids" {
+  description = "(optional) IDs of additional security groups for masters."
+  type        = list(string)
 }

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"crypto/x509"
-	"fmt"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -36,6 +35,7 @@ import (
 	timer "github.com/openshift/installer/pkg/metrics/timer"
 	"github.com/openshift/installer/pkg/types/baremetal"
 	cov1helpers "github.com/openshift/library-go/pkg/config/clusteroperator/v1helpers"
+	"github.com/openshift/library-go/pkg/route/routeapihelpers"
 )
 
 type target struct {
@@ -131,6 +131,7 @@ var (
 					if err2 := logClusterOperatorConditions(ctx, config); err2 != nil {
 						logrus.Error("Attempted to gather ClusterOperator status after installation failure: ", err2)
 					}
+					logTroubleshootingLink()
 					logrus.Fatal(err)
 				}
 				timer.StopTimer(timer.TotalTimeElapsed)
@@ -208,14 +209,14 @@ func runTargetCmd(targets ...asset.WritableAsset) func(cmd *cobra.Command, args 
 }
 
 // addRouterCAToClusterCA adds router CA to cluster CA in kubeconfig
-func addRouterCAToClusterCA(config *rest.Config, directory string) (err error) {
+func addRouterCAToClusterCA(ctx context.Context, config *rest.Config, directory string) (err error) {
 	client, err := kubernetes.NewForConfig(config)
 	if err != nil {
 		return errors.Wrap(err, "creating a Kubernetes client")
 	}
 
 	// Configmap may not exist. log and accept not-found errors with configmap.
-	caConfigMap, err := client.CoreV1().ConfigMaps("openshift-config-managed").Get("default-ingress-cert", metav1.GetOptions{})
+	caConfigMap, err := client.CoreV1().ConfigMaps("openshift-config-managed").Get(ctx, "default-ingress-cert", metav1.GetOptions{})
 	if err != nil {
 		return errors.Wrap(err, "fetching default-ingress-cert configmap from openshift-config-managed namespace")
 	}
@@ -439,26 +440,21 @@ func waitForConsole(ctx context.Context, config *rest.Config) (string, error) {
 	silenceRemaining := logDownsample
 	timer.StartTimer("Console")
 	wait.Until(func() {
-		consoleRoutes, err := rc.RouteV1().Routes(consoleNamespace).List(metav1.ListOptions{})
-		if err == nil && len(consoleRoutes.Items) > 0 {
-			for _, route := range consoleRoutes.Items {
-				logrus.Debugf("Route found in openshift-console namespace: %s", route.Name)
-				if route.Name == consoleRouteName {
-					url = fmt.Sprintf("https://%s", route.Spec.Host)
-				}
+		route, err := rc.RouteV1().Routes(consoleNamespace).Get(ctx, consoleRouteName, metav1.GetOptions{})
+		if err == nil {
+			logrus.Debugf("Route found in openshift-console namespace: %s", consoleRouteName)
+			if uri, _, err2 := routeapihelpers.IngressURI(route, ""); err2 == nil {
+				url = uri.String()
+				logrus.Debug("OpenShift console route is admitted")
+				cancel()
+			} else {
+				err = err2
 			}
-			logrus.Debug("OpenShift console route is created")
-			cancel()
-		} else if err != nil {
+		}
+		if err != nil {
 			silenceRemaining--
 			if silenceRemaining == 0 {
 				logrus.Debugf("Still waiting for the console route: %v", err)
-				silenceRemaining = logDownsample
-			}
-		} else if len(consoleRoutes.Items) == 0 {
-			silenceRemaining--
-			if silenceRemaining == 0 {
-				logrus.Debug("Still waiting for the console route...")
 				silenceRemaining = logDownsample
 			}
 		}
@@ -503,9 +499,16 @@ func waitForInstallComplete(ctx context.Context, config *rest.Config, directory 
 		return err
 	}
 
-	if err = addRouterCAToClusterCA(config, rootOpts.dir); err != nil {
+	if err = addRouterCAToClusterCA(ctx, config, rootOpts.dir); err != nil {
 		return err
 	}
 
 	return logComplete(rootOpts.dir, consoleURL)
+}
+
+func logTroubleshootingLink() {
+	logrus.Error(`Cluster initialization failed because one or more operators are not functioning properly.
+The cluster should be accessible for troubleshooting as detailed in the documentation linked below,
+https://docs.openshift.com/container-platform/latest/support/troubleshooting/troubleshooting-installations.html
+The 'wait-for install-complete' subcommand can then be used to continue the installation`)
 }

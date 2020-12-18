@@ -10,9 +10,8 @@ import (
 	"github.com/gophercloud/gophercloud/openstack/compute/v2/flavors"
 )
 
-var (
-	validFlavor = "valid-flavor"
-	validZone   = "valid-zone"
+const (
+	validZone = "valid-zone"
 
 	validCtrlPlaneFlavor = "valid-control-plane-flavor"
 	validComputeFlavor   = "valid-compute-flavor"
@@ -21,6 +20,12 @@ var (
 
 	invalidComputeFlavor   = "invalid-compute-flavor"
 	invalidCtrlPlaneFlavor = "invalid-control-plane-flavor"
+
+	baremetalFlavor = "baremetal-flavor"
+
+	volumeType      = "performance"
+	volumeSmallSize = 10
+	volumeLargeSize = 25
 )
 
 func validMachinePool() *openstack.MachinePool {
@@ -30,32 +35,71 @@ func validMachinePool() *openstack.MachinePool {
 	}
 }
 
+func invalidMachinePoolSmallVolume() *openstack.MachinePool {
+	return &openstack.MachinePool{
+		FlavorName: validCtrlPlaneFlavor,
+		Zones:      []string{""},
+		RootVolume: &openstack.RootVolume{
+			Type: volumeType,
+			Size: volumeSmallSize,
+		},
+	}
+}
+
+func validMachinePoolLargeVolume() *openstack.MachinePool {
+	return &openstack.MachinePool{
+		FlavorName: validCtrlPlaneFlavor,
+		Zones:      []string{""},
+		RootVolume: &openstack.RootVolume{
+			Type: volumeType,
+			Size: volumeLargeSize,
+		},
+	}
+}
+
 func validMpoolCloudInfo() *CloudInfo {
 	return &CloudInfo{
-		Flavors: map[string]*flavors.Flavor{
+		Flavors: map[string]Flavor{
 			validCtrlPlaneFlavor: {
-				Name:  validCtrlPlaneFlavor,
-				RAM:   16,
-				Disk:  25,
-				VCPUs: 4,
+				Flavor: &flavors.Flavor{
+					Name:  validCtrlPlaneFlavor,
+					RAM:   16,
+					Disk:  25,
+					VCPUs: 4,
+				},
 			},
 			validComputeFlavor: {
-				Name:  validComputeFlavor,
-				RAM:   8,
-				Disk:  25,
-				VCPUs: 2,
+				Flavor: &flavors.Flavor{
+					Name:  validComputeFlavor,
+					RAM:   8,
+					Disk:  25,
+					VCPUs: 2,
+				},
 			},
 			invalidCtrlPlaneFlavor: {
-				Name:  invalidCtrlPlaneFlavor,
-				RAM:   8, // too low
-				Disk:  25,
-				VCPUs: 2, // too low
+				Flavor: &flavors.Flavor{
+					Name:  invalidCtrlPlaneFlavor,
+					RAM:   8, // too low
+					Disk:  25,
+					VCPUs: 2, // too low
+				},
 			},
 			invalidComputeFlavor: {
-				Name:  invalidComputeFlavor,
-				RAM:   8,
-				Disk:  10, // too low
-				VCPUs: 2,
+				Flavor: &flavors.Flavor{
+					Name:  invalidComputeFlavor,
+					RAM:   8,
+					Disk:  10, // too low
+					VCPUs: 2,
+				},
+			},
+			baremetalFlavor: {
+				Flavor: &flavors.Flavor{
+					Name:  baremetalFlavor,
+					RAM:   8,  // too low
+					Disk:  10, // too low
+					VCPUs: 2,  // too low
+				},
+				Baremetal: true,
 			},
 		},
 		Zones: []string{
@@ -119,9 +163,13 @@ func TestOpenStackMachinepoolValidation(t *testing.T) {
 				mp.FlavorName = notExistFlavor
 				return mp
 			}(),
-			cloudInfo:      validMpoolCloudInfo(),
+			cloudInfo: func() *CloudInfo {
+				ci := validMpoolCloudInfo()
+				ci.Flavors[notExistFlavor] = Flavor{}
+				return ci
+			}(),
 			expectedError:  true,
-			expectedErrMsg: "controlPlane.platform.openstack.flavorName: Not found: \"non-existant-flavor\"",
+			expectedErrMsg: "controlPlane.platform.openstack.type: Not found: \"non-existant-flavor\"",
 		},
 		{
 			name: "not found compute flavorName",
@@ -130,9 +178,13 @@ func TestOpenStackMachinepoolValidation(t *testing.T) {
 				mp.FlavorName = notExistFlavor
 				return mp
 			}(),
-			cloudInfo:      validMpoolCloudInfo(),
+			cloudInfo: func() *CloudInfo {
+				ci := validMpoolCloudInfo()
+				ci.Flavors[notExistFlavor] = Flavor{}
+				return ci
+			}(),
 			expectedError:  true,
-			expectedErrMsg: `compute\[0\].platform.openstack.flavorName: Not found: "non-existant-flavor"`,
+			expectedErrMsg: `compute\[0\].platform.openstack.type: Not found: "non-existant-flavor"`,
 		},
 		{
 			name:         "invalid control plane flavorName",
@@ -144,7 +196,7 @@ func TestOpenStackMachinepoolValidation(t *testing.T) {
 			}(),
 			cloudInfo:      validMpoolCloudInfo(),
 			expectedError:  true,
-			expectedErrMsg: "controlPlane.platform.openstack.flavorName: Invalid value: \"invalid-control-plane-flavor\": Flavor did not meet the following minimum requirements: Must have minimum of 16 GB RAM, had 8 GB; Must have minimum of 4 VCPUs, had 2",
+			expectedErrMsg: "controlPlane.platform.openstack.type: Invalid value: \"invalid-control-plane-flavor\": Flavor did not meet the following minimum requirements: Must have minimum of 16 GB RAM, had 8 GB; Must have minimum of 4 VCPUs, had 2",
 		},
 		{
 			name:         "invalid compute flavorName",
@@ -156,7 +208,43 @@ func TestOpenStackMachinepoolValidation(t *testing.T) {
 			}(),
 			cloudInfo:      validMpoolCloudInfo(),
 			expectedError:  true,
-			expectedErrMsg: `compute\[0\].platform.openstack.flavorName: Invalid value: "invalid-compute-flavor": Flavor did not meet the following minimum requirements: Must have minimum of 25 GB Disk, had 10 GB`,
+			expectedErrMsg: `compute\[0\].platform.openstack.type: Invalid value: "invalid-compute-flavor": Flavor did not meet the following minimum requirements: Must have minimum of 25 GB Disk, had 10 GB`,
+		},
+		{
+			name:         "valid baremetal compute",
+			controlPlane: false,
+			mpool: func() *openstack.MachinePool {
+				mp := validMachinePool()
+				mp.FlavorName = baremetalFlavor
+				return mp
+			}(),
+			cloudInfo:      validMpoolCloudInfo(),
+			expectedError:  false,
+			expectedErrMsg: "",
+		},
+		{
+			name:         "volume too small",
+			controlPlane: false,
+			mpool: func() *openstack.MachinePool {
+				mp := invalidMachinePoolSmallVolume()
+				mp.FlavorName = invalidCtrlPlaneFlavor
+				return mp
+			}(),
+			cloudInfo:      validMpoolCloudInfo(),
+			expectedError:  true,
+			expectedErrMsg: "Volume size must be greater than 25 to use root volumes, had 10",
+		},
+		{
+			name:         "volume big enough",
+			controlPlane: false,
+			mpool: func() *openstack.MachinePool {
+				mp := validMachinePoolLargeVolume()
+				mp.FlavorName = invalidCtrlPlaneFlavor
+				return mp
+			}(),
+			cloudInfo:      validMpoolCloudInfo(),
+			expectedError:  false,
+			expectedErrMsg: "",
 		},
 	}
 

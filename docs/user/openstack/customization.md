@@ -20,19 +20,20 @@ Beyond the [platform-agnostic `install-config.yaml` properties](../customization
 ## Cluster-scoped properties
 
 * `cloud` (required string): The name of the OpenStack cloud to use from `clouds.yaml`.
-* `computeFlavor` (required string): The OpenStack flavor to use for compute and control-plane machines.
-    This is currently required, but has lower precedence than [the `type` property](#machine-pools) on [the `compute` and `controlPlane` machine-pools](../customization.md#platform-customization).
+* `computeFlavor` (deprecated string): The OpenStack flavor to use for compute and control-plane machines.
 * `externalDNS` (optional list of strings): The IP addresses of DNS servers to be used for the DNS resolution of all instances in the cluster
-* `externalNetwork` (optional string): Name of external network the installer will use to provide access to the cluster. If defined, a floating ip from this network will be created and associated with the bootstrap node to facilitate debugging and connection to the bootstrap node during installation. The lbFloatingIP property is a floating ip address selected from this network.
-* `lbFloatingIP` (optional string): Address of existing Floating IP from externalNetwork the installer will associate with the API load balancer. This property is only valid if externalNetwork is defined. If externalNetwork is not defined, the installer will throw an error.
+* `externalNetwork` (optional string): Name of external network the installer will use to provide access to the cluster. If defined, a floating IP from this network will be created and associated with the bootstrap node to facilitate debugging and connection to the bootstrap node during installation. The `apiFloatingIP` property is a floating IP address selected from this network.
+* `apiFloatingIP` (optional string): Address of existing Floating IP from externalNetwork the installer will associate with the OpenShift API. This property is only valid if externalNetwork is defined. If externalNetwork is not defined, the installer will throw an error.
 * `ingressFloatingIP` (optional string): Address of an existing Floating IP from externalNetwork the installer will associate with the ingress port. This property is only valid if externalNetwork is defined. If externalNetwork is not defined, the installer will throw an error.
 * `octaviaSupport` (deprecated string): Whether OpenStack supports Octavia (`1` for true or `0` for false)
 * `region` (deprecated string): The OpenStack region where the cluster will be created. Currently this value is not used by the installer.
 * `trunkSupport` (deprecated string): Whether OpenStack ports can be trunked (`1` for true or `0` for false)
 * `clusterOSImage` (optional string): Either a URL with `http(s)` or `file` scheme to override the default OS image for cluster nodes or an existing Glance image name.
+* `clusterOSImageProperties` (optional list of strings): a list of properties to be added to the installer-uploaded ClusterOSImage in Glance. The default is to not set any properties. `clusterOSImageProperties` is ignored when `clusterOSImage` points to an existing image in Glance.
 * `apiVIP` (optional string): An IP address on the machineNetwork that will be assigned to the API VIP. Be aware that the `10` and `11` of the machineNetwork will be taken by neutron dhcp by default, and wont be available.
 * `ingressVIP` (optional string): An IP address on the machineNetwork that will be assigned to the ingress VIP. Be aware that the `10` and `11` of the machineNetwork will be taken by neutron dhcp by default, and wont be available.
 * `machinesSubnet` (optional string): the UUID of an OpenStack subnet to install the nodes of the cluster onto. For more information on how to install with a custom subnet, see the [custom subnets](#custom-subnets) section of the docs.
+* `defaultMachinePlatform` (optional object): Default [OpenStack-specific machine pool properties](#machine-pools) which apply to [machine pools](../customization.md#machine-pools) that do not define their own OpenStack-specific properties.
 
 ## Machine pools
 
@@ -40,7 +41,7 @@ Beyond the [platform-agnostic `install-config.yaml` properties](../customization
 * `additionalSecurityGroupIDs` (optional list of strings): IDs of additional security groups for machines.
 * `type` (optional string): The OpenStack flavor name for machines in the pool.
 * `rootVolume` (optional object): Defines the root volume for instances in the machine pool. The instances use ephemeral disks if not set.
-  * `size` (required integer): Size of the root volume in GB.
+  * `size` (required integer): Size of the root volume in GB. Must be set to at least 25.
   * `type` (required string): The volume pool to create the volume from.
 * `zones` (optional list of strings): The names of the availability zones you want to install your nodes on. If unset, the installer will use your default compute zone.
 
@@ -65,13 +66,14 @@ metadata:
   name: test-cluster
 platform:
   openstack:
+    apiFloatingIP: 128.0.0.1
     cloud: mycloud
-    computeFlavor: m1.s2.xlarge
+    defaultMachinePlatform:
+      type: m1.s2.xlarge
     externalNetwork: external
     externalDNS:
       - "8.8.8.8"
       - "192.168.1.12"
-    lbFloatingIP: 128.0.0.1
 pullSecret: '{"auths": ...}'
 sshKey: ssh-ed25519 AAAA...
 ```
@@ -99,10 +101,11 @@ metadata:
   name: test-cluster
 platform:
   openstack:
+    apiFloatingIP: 128.0.0.1
     cloud: mycloud
-    computeFlavor: m1.s2.xlarge
+    defaultMachinePlatform:
+      type: m1.s2.xlarge
     externalNetwork: external
-    lbFloatingIP: 128.0.0.1
 pullSecret: '{"auths": ...}'
 sshKey: ssh-ed25519 AAAA...
 ```
@@ -147,9 +150,18 @@ platform:
 
 ## Custom Subnets
 
-Before running the installer with a custom `machinesSubnet`, there are a few things you should check. First, make sure that you have a network and subnet available. Note that the installer will create ports on this network, and some ports will be given a fixed IP addresses in the subnet's CIDR. Make sure that the credentials that you give the installer are authorized to do this! The installer will also apply a tag to the subnet. Lastly, the installer will not create a router, so make sure to do this if you need a router to attach floating ip addresses to the network you want to install the nodes onto. Note that for now, this feature does not fully support provider networks.
+In the `install-config.yaml` file, the value of the `machinesSubnet` property is the subnet where the Kubernetes endpoints of the nodes in your cluster are published. The Ingress and API ports are created on this subnet, too. By default, the installer creates a network and subnet for these endpoints and ports. Alternatively, you can use a subnet of your own by setting the value of the `machinesSubnet` property to the UUID of an existing OpenStack subnet. To use this feature, you need to meet these requirements:
 
-Once that is ironed out, you can pass the ID of the subnet to the install config with the `machinesSubnet` option. This subnet will be tagged as the primary subnet for the cluster. The nodes, and VIP port will be created on this subnet. This does add some complexity to the install process that needs to be accounted for. First of all, the subnet must have DHCP enabled. Also, the CIDR of the custom subnet must match the cidr of `networks.machineNetwork`. Be aware that the API and Ingress VIPs by default will try to take the .5 and .7 of your network CIDR. To avoid other services taking the ports assigned to the api and ingress VIPs, it is recommended that users set the `apiVIP` and `ingressVIP` options in the install config to addresses that are outside of the DHCP allocation pool. Lastly, note that setting `externalDNS` while setting `machinesSubnet` is invalid usage, since the installer will not modify your subnet. If you want to add a DNS to your cluster while using a custom subnet, add it to the subnet in openstack [like this](https://docs.openstack.org/neutron/rocky/admin/config-dns-res.html).
+* The subnet that is used by `machinesSubnet` has DHCP enabled.
+* The CIDR of `machinesSubnet` matches the CIDR of `networks.machineNetwork`.
+* The installer user must have permission to create ports on this network, including ports with fixed IP addresses.
+
+You should also be aware of the following limitations:
+
+* If you plan to install a cluster that uses floating IPs, the `machinesSubnet` must be attached to a router that is connected to the `externalNetwork`.
+* The installer will not create a private network or subnet for your OpenShift machines if the `machinesSubnet` is set in the `install-config.yaml`.
+* By default, the API and Ingress VIPs use the .5 and .7 of your network CIDR. To prevent other services from taking the ports that are assigned to the API and Ingress VIPs, set the `apiVIP` and `ingressVIP` options in the `install-config.yaml` to addresses that are outside of the DHCP allocation pool.
+* You cannot use the `externalDNS` property at the same time as a custom `machinesSubnet`. If you want to add a DNS to your cluster while using a custom subnet, [add it to the subnet in OpenStack](https://docs.openstack.org/neutron/rocky/admin/config-dns-res.html).
 
 ## Additional Networks
 

@@ -12,11 +12,13 @@ import (
 	baremetalprovider "github.com/metal3-io/cluster-api-provider-baremetal/pkg/apis/baremetal/v1alpha1"
 	gcpapi "github.com/openshift/cluster-api-provider-gcp/pkg/apis"
 	gcpprovider "github.com/openshift/cluster-api-provider-gcp/pkg/apis/gcpprovider/v1beta1"
+	kubevirtproviderapi "github.com/openshift/cluster-api-provider-kubevirt/pkg/apis"
+	kubevirtprovider "github.com/openshift/cluster-api-provider-kubevirt/pkg/apis/kubevirtprovider/v1alpha1"
 	libvirtapi "github.com/openshift/cluster-api-provider-libvirt/pkg/apis"
 	libvirtprovider "github.com/openshift/cluster-api-provider-libvirt/pkg/apis/libvirtproviderconfig/v1beta1"
 	ovirtproviderapi "github.com/openshift/cluster-api-provider-ovirt/pkg/apis"
 	ovirtprovider "github.com/openshift/cluster-api-provider-ovirt/pkg/apis/ovirtprovider/v1beta1"
-	machineapi "github.com/openshift/cluster-api/pkg/apis/machine/v1beta1"
+	machineapi "github.com/openshift/machine-api-operator/pkg/apis/machine/v1beta1"
 	vsphereapi "github.com/openshift/machine-api-operator/pkg/apis/vsphereprovider"
 	vsphereprovider "github.com/openshift/machine-api-operator/pkg/apis/vsphereprovider/v1beta1"
 	mcfgv1 "github.com/openshift/machine-config-operator/pkg/apis/machineconfiguration.openshift.io/v1"
@@ -38,6 +40,7 @@ import (
 	"github.com/openshift/installer/pkg/asset/machines/azure"
 	"github.com/openshift/installer/pkg/asset/machines/baremetal"
 	"github.com/openshift/installer/pkg/asset/machines/gcp"
+	"github.com/openshift/installer/pkg/asset/machines/kubevirt"
 	"github.com/openshift/installer/pkg/asset/machines/libvirt"
 	"github.com/openshift/installer/pkg/asset/machines/machineconfig"
 	"github.com/openshift/installer/pkg/asset/machines/openstack"
@@ -52,6 +55,7 @@ import (
 	azuredefaults "github.com/openshift/installer/pkg/types/azure/defaults"
 	baremetaltypes "github.com/openshift/installer/pkg/types/baremetal"
 	gcptypes "github.com/openshift/installer/pkg/types/gcp"
+	kubevirttypes "github.com/openshift/installer/pkg/types/kubevirt"
 	libvirttypes "github.com/openshift/installer/pkg/types/libvirt"
 	nonetypes "github.com/openshift/installer/pkg/types/none"
 	openstacktypes "github.com/openshift/installer/pkg/types/openstack"
@@ -197,7 +201,7 @@ func (m *Master) Generate(dependencies asset.Parents) error {
 			subnets,
 			pool,
 			"master",
-			"master-user-data-managed",
+			"master-user-data",
 			installConfig.Config.Platform.AWS.UserTags,
 		)
 		if err != nil {
@@ -216,7 +220,7 @@ func (m *Master) Generate(dependencies asset.Parents) error {
 			mpool.Zones = azs
 		}
 		pool.Platform.GCP = &mpool
-		machines, err = gcp.Machines(clusterID.InfraID, ic, pool, string(*rhcosImage), "master", "master-user-data-managed")
+		machines, err = gcp.Machines(clusterID.InfraID, ic, pool, string(*rhcosImage), "master", "master-user-data")
 		if err != nil {
 			return errors.Wrap(err, "failed to create master machine objects")
 		}
@@ -226,19 +230,19 @@ func (m *Master) Generate(dependencies asset.Parents) error {
 		mpool.Set(ic.Platform.Libvirt.DefaultMachinePlatform)
 		mpool.Set(pool.Platform.Libvirt)
 		pool.Platform.Libvirt = &mpool
-		machines, err = libvirt.Machines(clusterID.InfraID, ic, pool, "master", "master-user-data-managed")
+		machines, err = libvirt.Machines(clusterID.InfraID, ic, pool, "master", "master-user-data")
 		if err != nil {
 			return errors.Wrap(err, "failed to create master machine objects")
 		}
 	case openstacktypes.Name:
-		mpool := defaultOpenStackMachinePoolPlatform(ic.Platform.OpenStack.FlavorName)
+		mpool := defaultOpenStackMachinePoolPlatform()
 		mpool.Set(ic.Platform.OpenStack.DefaultMachinePlatform)
 		mpool.Set(pool.Platform.OpenStack)
 		pool.Platform.OpenStack = &mpool
 
 		imageName, _ := rhcosutils.GenerateOpenStackImageName(string(*rhcosImage), clusterID.InfraID)
 
-		machines, err = openstack.Machines(clusterID.InfraID, ic, pool, imageName, "master", "master-user-data-managed")
+		machines, err = openstack.Machines(clusterID.InfraID, ic, pool, imageName, "master", "master-user-data")
 		if err != nil {
 			return errors.Wrap(err, "failed to create master machine objects")
 		}
@@ -268,7 +272,7 @@ func (m *Master) Generate(dependencies asset.Parents) error {
 
 		pool.Platform.Azure = &mpool
 
-		machines, err = azure.Machines(clusterID.InfraID, ic, pool, string(*rhcosImage), "master", "master-user-data-managed")
+		machines, err = azure.Machines(clusterID.InfraID, ic, pool, string(*rhcosImage), "master", "master-user-data")
 		if err != nil {
 			return errors.Wrap(err, "failed to create master machine objects")
 		}
@@ -279,7 +283,7 @@ func (m *Master) Generate(dependencies asset.Parents) error {
 		mpool.Set(pool.Platform.BareMetal)
 		pool.Platform.BareMetal = &mpool
 
-		machines, err = baremetal.Machines(clusterID.InfraID, ic, pool, string(*rhcosImage), "master", "master-user-data-managed")
+		machines, err = baremetal.Machines(clusterID.InfraID, ic, pool, string(*rhcosImage), "master", "master-user-data")
 		if err != nil {
 			return errors.Wrap(err, "failed to create master machine objects")
 		}
@@ -331,7 +335,7 @@ func (m *Master) Generate(dependencies asset.Parents) error {
 
 		imageName, _ := rhcosutils.GenerateOpenStackImageName(string(*rhcosImage), clusterID.InfraID)
 
-		machines, err = ovirt.Machines(clusterID.InfraID, ic, pool, imageName, "master", "master-user-data-managed")
+		machines, err = ovirt.Machines(clusterID.InfraID, ic, pool, imageName, "master", "master-user-data")
 		if err != nil {
 			return errors.Wrap(err, "failed to create master machine objects for ovirt provider")
 		}
@@ -344,17 +348,29 @@ func (m *Master) Generate(dependencies asset.Parents) error {
 		pool.Platform.VSphere = &mpool
 		templateName := clusterID.InfraID + "-rhcos"
 
-		machines, err = vsphere.Machines(clusterID.InfraID, ic, pool, templateName, "master", "master-user-data-managed")
+		machines, err = vsphere.Machines(clusterID.InfraID, ic, pool, templateName, "master", "master-user-data")
 		if err != nil {
 			return errors.Wrap(err, "failed to create master machine objects")
 		}
 		vsphere.ConfigMasters(machines, clusterID.InfraID)
+	case kubevirttypes.Name:
+		mpool := defaultKubevirtMachinePoolPlatform()
+		mpool.Set(ic.Platform.Kubevirt.DefaultMachinePlatform)
+		mpool.Set(pool.Platform.Kubevirt)
+		pool.Platform.Kubevirt = &mpool
+
+		imageName, _ := rhcosutils.GenerateOpenStackImageName(string(*rhcosImage), clusterID.InfraID)
+
+		machines, err = kubevirt.Machines(clusterID.InfraID, ic, pool, imageName, "master", "master-user-data")
+		if err != nil {
+			return errors.Wrap(err, "failed to create master machine objects for kubevirt provider")
+		}
 	case nonetypes.Name:
 	default:
 		return fmt.Errorf("invalid Platform")
 	}
 
-	data, err := userDataSecret("master-user-data-managed", mign.File.Data)
+	data, err := userDataSecret("master-user-data", mign.File.Data)
 	if err != nil {
 		return errors.Wrap(err, "failed to create user-data secret for master machines")
 	}
@@ -477,6 +493,7 @@ func (m *Master) Machines() ([]machineapi.Machine, error) {
 	openstackapi.AddToScheme(scheme)
 	ovirtproviderapi.AddToScheme(scheme)
 	vsphereapi.AddToScheme(scheme)
+	kubevirtproviderapi.AddToScheme(scheme)
 	decoder := serializer.NewCodecFactory(scheme).UniversalDecoder(
 		awsprovider.SchemeGroupVersion,
 		azureprovider.SchemeGroupVersion,
@@ -486,6 +503,7 @@ func (m *Master) Machines() ([]machineapi.Machine, error) {
 		openstackprovider.SchemeGroupVersion,
 		vsphereprovider.SchemeGroupVersion,
 		ovirtprovider.SchemeGroupVersion,
+		kubevirtprovider.SchemeGroupVersion,
 	)
 
 	machines := []machineapi.Machine{}

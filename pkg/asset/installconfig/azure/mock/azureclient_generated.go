@@ -6,12 +6,13 @@ package mock
 
 import (
 	context "context"
+	reflect "reflect"
+
 	compute "github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-10-01/compute"
 	network "github.com/Azure/azure-sdk-for-go/services/network/mgmt/2018-12-01/network"
 	resources "github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2019-05-01/resources"
 	subscriptions "github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2019-06-01/subscriptions"
 	gomock "github.com/golang/mock/gomock"
-	reflect "reflect"
 )
 
 // MockAPI is a mock of API interface.
@@ -110,6 +111,21 @@ func (m *MockAPI) GetResourcesProvider(ctx context.Context, resourceProviderName
 func (mr *MockAPIMockRecorder) GetResourcesProvider(ctx, resourceProviderNamespace interface{}) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetResourcesProvider", reflect.TypeOf((*MockAPI)(nil).GetResourcesProvider), ctx, resourceProviderNamespace)
+}
+
+// GetVirtualMachineSku mocks base method.
+func (m *MockAPI) GetVirtualMachineSku(ctx context.Context, name, region string) (*compute.ResourceSku, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetVirtualMachineSku", ctx, name, region)
+	ret0, _ := ret[0].(*compute.ResourceSku)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetVirtualMachineSku indicates an expected call of GetVirtualMachineSku.
+func (mr *MockAPIMockRecorder) GetVirtualMachineSku(ctx, name, region interface{}) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetVirtualMachineSku", reflect.TypeOf((*MockAPI)(nil).GetVirtualMachineSku), ctx, name, region)
 }
 
 // GetDiskSkus mocks base method.

@@ -13,6 +13,7 @@ import (
 	"github.com/openshift/installer/pkg/types/azure"
 	"github.com/openshift/installer/pkg/types/baremetal"
 	"github.com/openshift/installer/pkg/types/gcp"
+	"github.com/openshift/installer/pkg/types/kubevirt"
 	"github.com/openshift/installer/pkg/types/libvirt"
 	"github.com/openshift/installer/pkg/types/none"
 	"github.com/openshift/installer/pkg/types/openstack"
@@ -48,10 +49,21 @@ func (a *PlatformPermsCheck) Generate(dependencies asset.Parents) error {
 	platform := ic.Config.Platform.Name()
 	switch platform {
 	case aws.Name:
-		permissionGroups := []awsconfig.PermissionGroup{awsconfig.PermissionCreateBase, awsconfig.PermissionDeleteBase}
-		// If subnets are not provided in install-config.yaml, include network permissions
-		if len(ic.Config.AWS.Subnets) == 0 {
-			permissionGroups = append(permissionGroups, awsconfig.PermissionCreateNetworking, awsconfig.PermissionDeleteNetworking)
+		permissionGroups := []awsconfig.PermissionGroup{awsconfig.PermissionCreateBase}
+		usingExistingVPC := len(ic.Config.AWS.Subnets) != 0
+
+		if !usingExistingVPC {
+			permissionGroups = append(permissionGroups, awsconfig.PermissionCreateNetworking)
+		}
+
+		// Add delete permissions for non-C2S installs.
+		if !aws.C2SRegions.Has(ic.Config.AWS.Region) {
+			permissionGroups = append(permissionGroups, awsconfig.PermissionDeleteBase)
+			if usingExistingVPC {
+				permissionGroups = append(permissionGroups, awsconfig.PermissionDeleteSharedNetworking)
+			} else {
+				permissionGroups = append(permissionGroups, awsconfig.PermissionDeleteNetworking)
+			}
 		}
 
 		ssn, err := ic.AWS.Session(ctx)
@@ -72,7 +84,7 @@ func (a *PlatformPermsCheck) Generate(dependencies asset.Parents) error {
 		if err = gcpconfig.ValidateEnabledServices(ctx, client, ic.Config.GCP.ProjectID); err != nil {
 			return errors.Wrap(err, "failed to validate services in this project")
 		}
-	case azure.Name, baremetal.Name, libvirt.Name, none.Name, openstack.Name, ovirt.Name, vsphere.Name:
+	case azure.Name, baremetal.Name, libvirt.Name, none.Name, openstack.Name, ovirt.Name, vsphere.Name, kubevirt.Name:
 		// no permissions to check
 	default:
 		err = fmt.Errorf("unknown platform type %q", platform)

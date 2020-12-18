@@ -28,7 +28,7 @@ of this method of installation.
   - [Red Hat Enterprise Linux CoreOS (RHCOS)](#red-hat-enterprise-linux-coreos-rhcos)
   - [API and Ingress Floating IP Addresses](#api-and-ingress-floating-ip-addresses)
   - [Install Config](#install-config)
-    - [Configure the machineNetwork CIDR, apiVIP, and ingressVIP](#configure-the-machinenetworkcidr-apivip-and-ingressvip)
+    - [Configure the machineNetwork.CIDR apiVIP and ingressVIP](#configure-the-machinenetworkcidr-apivip-and-ingressvip)
     - [Empty Compute Pools](#empty-compute-pools)
     - [Modify NetworkType (Required for Kuryr SDN)](#modify-networktype-required-for-kuryr-sdn)
   - [Edit Manifests](#edit-manifests)
@@ -58,6 +58,7 @@ of this method of installation.
     - [Compute Nodes Trunks (Kuryr SDN)](#compute-nodes-trunks-kuryr-sdn)
     - [Approve the worker CSRs](#approve-the-worker-csrs)
     - [Wait for the OpenShift Installation to Complete](#wait-for-the-openshift-installation-to-complete)
+    - [Compute Nodes with SR-IOV NICs](#compute-nodes-with-sr-iov-nics)
   - [Destroy the OpenShift Cluster](#destroy-the-openshift-cluster)
 
 ## Prerequisites
@@ -73,7 +74,7 @@ The requirements for UPI are broadly similar to the [ones for OpenStack IPI][ipi
   - input in the `openshift-install` wizard
 - Nova flavors
   - inventory: `os_flavor_master` and `os_flavor_worker`
-- An external subnet you want to use for floating IP addresses (if FIPs are used)
+- An external subnet for external connectivity. Required if any of the floating IPs is set in the inventory.
   - inventory: `os_external_network`
 - The `openshift-install` binary
 - A subnet range for the Nova servers / OpenShift Nodes, that does not conflict with your existing network
@@ -144,13 +145,17 @@ sudo subscription-manager repos --disable=* # if not done already
 sudo subscription-manager repos \
   --enable=rhel-8-for-x86_64-baseos-rpms \
   --enable=openstack-16-tools-for-rhel-8-x86_64-rpms \
-  --enable=ansible-2.8-for-rhel-8-x86_64-rpms \
+  --enable=ansible-2.9-for-rhel-8-x86_64-rpms \
   --enable=rhel-8-for-x86_64-appstream-rpms
 ```
 
 Then install the packages:
 ```sh
-sudo yum install python3-openstackclient ansible python3-openstacksdk python3-netaddr
+sudo dnf install python3-openstackclient ansible
+
+sudo ansible-galaxy collection install \
+  ansible.netcommon \
+  openstack.cloud
 ```
 
 Make sure that `python` points to Python3:
@@ -163,7 +168,11 @@ sudo alternatives --set python /usr/bin/python3
 This command installs all required dependencies on Fedora:
 
 ```sh
-sudo dnf install python-openstackclient ansible python-openstacksdk python-netaddr
+sudo dnf install python3-openstackclient ansible
+
+sudo ansible-galaxy collection install \
+  ansible.netcommon \
+  openstack.cloud
 ```
 
 [ansible-upi]: ../../../upi/openstack "Ansible Playbooks for Openstack UPI"
@@ -199,6 +208,16 @@ $ openstack image create --container-format=bare --disk-format=qcow2 --file rhco
 
 **NOTE:** Depending on your OpenStack environment you can upload the RHCOS image as `raw` or `qcow2`. See [Disk and container formats for images](https://docs.openstack.org/image-guide/introduction.html#disk-and-container-formats-for-images) for more information.
 
+[qemu_guest_agent]: https://docs.openstack.org/nova/latest/admin/configuration/hypervisor-kvm.html 
+If the RHCOS image being used supports it,  the [KVM Qemu Guest Agent][qemu_guest_agent] may be used to enable optional
+access between OpenStack KVM hypervisors and the cluster nodes.
+
+To enable this feature, you must add the `hw_qemu_guest_agent=yes` property to the image:
+
+```
+$ openstack image rhcos update --property hw_qemu_guest_agent=yes
+```
+
 Finally validate that the image was successfully created:
 
 ```sh
@@ -210,15 +229,17 @@ $ openstack image show rhcos
 
 ## API and Ingress Floating IP Addresses
 
-If the variables `os_api_fip` and `os_ingress_fip` are found in `inventory.yaml`, the corresponding floating IPs will be attached to the API load balancer and to the worker nodes load balancer respectively. Note that `os_external_network` is a requirement for those. If `os_external_network` is found in `inventory.yaml`, the playbooks will create and attach an additional floating IP to the bootstrap machine.
+If the variables `os_api_fip`, `os_ingress_fip` and `os_bootstrap_fip` are found in `inventory.yaml`, the corresponding floating IPs will be attached to the API load balancer, to the worker nodes load balancer and to the temporary machine used for the install process, respectively. Note that `os_external_network` is a requirement for those.
 
-**NOTE**: throughout this document, we will use `203.0.113.23` as the public IP address for the OpenShift API endpoint and `203.0.113.19` as the public IP for the ingress (`*.apps`) endpoint.
+**NOTE**: throughout this document, we will use `203.0.113.23` as the public IP address for the OpenShift API endpoint and `203.0.113.19` as the public IP for the ingress (`*.apps`) endpoint. `203.0.113.20` will be the public IP used for the bootstrap machine.
 
 ```sh
 $ openstack floating ip create --description "OpenShift API" <external>
 => 203.0.113.23
 $ openstack floating ip create --description "OpenShift Ingress" <external>
 => 203.0.113.19
+$ openstack floating ip create --description "bootstrap machine" <external>
+=> 203.0.113.20
 ```
 
 The OpenShift API (for the OpenShift administrators and app developers) will be at `api.<cluster name>.<cluster domain>` and the Ingress (for the apps' end users) at `*.apps.<cluster name>.<cluster domain>`.
@@ -277,7 +298,7 @@ In the previous steps, the installer added default values for the `machineNetwor
 
 When the installer creates the manifest files from an existing `install-config.yaml` file, it validates that the
 `apiVIP` and `ingressVIP` fall within the IP range specified by `machineNetwork.CIDR`. If they do not, it errors out.
-If you change the value of `machineNetwork.CIDR` you must make sure the `apiVIP` and `ingresVIP` values still fall within
+If you change the value of `machineNetwork.CIDR` you must make sure the `apiVIP` and `ingressVIP` values still fall within
 the new range. There are two options for setting the `apiVIP` and `ingressVIP`. If you know the values you want to use,
 you can specify them in the `install-config.yaml` file. If you want the installer to pick the 5th and 7th IP addresses in the
 new range, you need to remove the `apiVIP` and `ingressVIP` entries from the `install-config.yaml` file.
@@ -302,7 +323,7 @@ open(path, "w").write(yaml.dump(data, default_flow_style=False))'
 Next, we need to correct the `apiVIP` and `ingressVIP` values.
 
 The following script will clear the values from the `install-config.yaml` file so that the installer will pick
-the 5th and 7th IP addresses in the new range, 192.0.2.5 and 192.0.2.7. 
+the 5th and 7th IP addresses in the new range, 192.0.2.5 and 192.0.2.7.
 
 ```sh
 $ python -c 'import yaml
@@ -331,7 +352,7 @@ if "ingressVIP" in data["platform"]["openstack"]:
 open(path, "w").write(yaml.dump(data, default_flow_style=False))'
 ```
 
-**NOTE**: All the scripts in this guide work with Python 3 as well as Python 2. You can also choose to edit the 
+**NOTE**: All the scripts in this guide work with Python 3 as well as Python 2. You can also choose to edit the
 `install-config.yaml` file by hand.
 
 ### Empty Compute Pools
@@ -588,17 +609,17 @@ https://static.example.com/bootstrap.ign
 ##### Example 1: Swift
 
 The `swift` client is needed for enabling listing on the container.
-
-Create the `<container_name>` container and upload the `bootstrap.ign` file:
+It can be installed by the following command:
 
 ```sh
-$ swift upload <container_name> bootstrap.ign
+$ sudo dnf install python3-swiftclient
 ```
 
-Make the container accessible:
+Create the `<container_name>` (e.g. $INFRA_ID) container and upload the `bootstrap.ign` file:
 
 ```sh
-$ swift post <container_name> --read-acl ".r:*,.rlistings"
+$ openstack container create <container_name> --public
+$ openstack object create <container_name> bootstrap.ign
 ```
 
 Get the `storage_url` from the output:
@@ -629,11 +650,13 @@ $ openstack catalog show image
 
 By default Glance service doesn't allow anonymous access to the data. So, if you use Glance to store the ignition config, then you also need to provide a valid auth token in the `ignition.config.merge.httpHeaders` field.
 
-To obtain the token execute:
+The token can be obtained with this command:
 
 ```sh
 openstack token issue -c id -f value
 ```
+
+Note that this token can be generated as any OpenStack user with Glance read access; this particular token will only be used for downloading the Ignition file.
 
 The command will return the token to be added to the `ignition.config.merge[0].httpHeaders` property in the Bootstrap Ignition Shim (see [below](#create-the-bootstrap-ignition-shim)):
 
@@ -741,7 +764,6 @@ $ ansible-playbook -i inventory.yaml security-groups.yaml
 ```
 
 The playbook creates one Security group for the Control Plane and one for the Compute nodes, then attaches rules for enabling communication between the nodes.
-
 ### Network, Subnet and external router
 
 ```sh
@@ -854,7 +876,9 @@ $ oc get pods -A
 $ ansible-playbook -i inventory.yaml down-bootstrap.yaml
 ```
 
-The teardown playbook deletes the bootstrap port, server and floating IP address.
+The teardown playbook deletes the bootstrap port and server.
+
+Now the bootstrap floating IP can also be destroyed.
 
 If you haven't done so already, you should also disable the bootstrap Ignition URL.
 
@@ -872,6 +896,34 @@ The workers need no ignition override.
 
 If `os_networking_type` is set to `Kuryr` in the Ansible inventory, the playbook creates the Trunks for Kuryr to plug the containers into the OpenStack SDN.
 
+### Compute Nodes with SR-IOV NICs
+
+Using single root I/O virtualization (SR-IOV) networking as an additional network in OpenShift can be beneficial for applications that require high bandwidth and low latency. To enable this in your cluster, you will need to install the [SR-IOV Network Operator](https://docs.openshift.com/container-platform/4.6/networking/hardware_networks/installing-sriov-operator.html). If you are not sure whether your cluster supports this feature, please refer to the [SR-IOV hardware networks documentation](https://docs.openshift.com/container-platform/4.6/networking/hardware_networks/about-sriov.html). If you are planning an openstack deployment with SR-IOV networks and need addition resources, check the [OpenStack SR-IOV deployment docs](https://access.redhat.com/documentation/en-us/red_hat_openstack_platform/16.1/html-single/network_functions_virtualization_planning_and_configuration_guide/index#assembly_sriov_parameters). Once you meet these requirements, you can start provisioning an SR-IOV network and subnet in OpenStack.
+
+```sh
+openstack network create radio --provider-physical-network radio --provider-network-type vlan --provider-segment 120
+
+openstack subnet create radio --network radio --subnet-range <your CIDR range> --dhcp
+```
+
+Your compute nodes will need to have two types of ports for this feature to work. One port needs to connect the node to your OpenShift network so that it can join the cluster and communicate with the other nodes. The other type of port is for your SR-IOV traffic. The OpenShift networking port should be created the same way we normally create ports for compute nodes.
+
+```sh
+openstack port os_port_worker_0 --network <infraID>-network --security-group <infraID>-worker --fixed-ip subnet=<infraID>-nodes,ip-address=<a fixed IP> --allowed-address ip-address=<infraID>-ingress-port
+```
+
+The SR-IOV port(s) must be created explicitly by the user and passed as a NIC during instance creation, otherwise the `vnic-type` will not be `direct` and it will not work.
+
+```sh
+openstack port create radio_port --vnic-type direct --network radio --fixed-ip subnet=radio,ip-address=<a fixed ip> --tag=radio --disable-port-security
+```
+
+When you create your instance, make sure that the SR-IOV port and the OCP port you created for it are added as NICs.
+
+```sh
+openstack server create --image <infraID>-rhcos --flavor ocp --user-data <ocp project>/build-artifacts/worker.ign --nic port-id=<os_port_worker_0 ID> --nic port-id=<radio_port ID> --config-drive true worker-<worker_id>.<cluster_name>.<cluster_domain>
+```
+
 ### Approve the worker CSRs
 
 Even after they've booted up, the workers will not show up in `oc get nodes`.
@@ -888,13 +940,13 @@ Eventually, you should see `Pending` entries looking like this
 $ oc get csr -A
 NAME        AGE    REQUESTOR                                                                   CONDITION
 csr-2scwb   16m    system:serviceaccount:openshift-machine-config-operator:node-bootstrapper   Approved,Issued
-csr-5jwqf   16m    system:node:openshift-qlvwv-master-0                                         Approved,Issued
+csr-5jwqf   16m    system:node:openshift-qlvwv-master-0                                        Approved,Issued
 csr-88jp8   116s   system:serviceaccount:openshift-machine-config-operator:node-bootstrapper   Pending
-csr-9dt8f   15m    system:node:openshift-qlvwv-master-1                                         Approved,Issued
+csr-9dt8f   15m    system:node:openshift-qlvwv-master-1                                        Approved,Issued
 csr-bqkw5   16m    system:serviceaccount:openshift-machine-config-operator:node-bootstrapper   Approved,Issued
 csr-dpprd   6s     system:serviceaccount:openshift-machine-config-operator:node-bootstrapper   Pending
 csr-dtcws   24s    system:serviceaccount:openshift-machine-config-operator:node-bootstrapper   Pending
-csr-lj7f9   16m    system:node:openshift-qlvwv-master-2                                         Approved,Issued
+csr-lj7f9   16m    system:node:openshift-qlvwv-master-2                                        Approved,Issued
 csr-lrtlk   15m    system:serviceaccount:openshift-machine-config-operator:node-bootstrapper   Approved,Issued
 csr-wkm94   16m    system:serviceaccount:openshift-machine-config-operator:node-bootstrapper   Approved,Issued
 ```
@@ -981,3 +1033,5 @@ The playbook `down-load-balancers.yaml` idempotently deletes the load balancers 
 `down-load-balancers.yaml` playbook once the load balancers have transitioned to `ACTIVE`.
 
 Then, remove the `api` and `*.apps` DNS records.
+
+The floating IPs can also be deleted if not useful any more.

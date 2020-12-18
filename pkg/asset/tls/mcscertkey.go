@@ -8,6 +8,7 @@ import (
 	"github.com/openshift/installer/pkg/asset"
 	"github.com/openshift/installer/pkg/asset/installconfig"
 	baremetaltypes "github.com/openshift/installer/pkg/types/baremetal"
+	kubevirttypes "github.com/openshift/installer/pkg/types/kubevirt"
 	openstacktypes "github.com/openshift/installer/pkg/types/openstack"
 	ovirttypes "github.com/openshift/installer/pkg/types/ovirt"
 	vspheretypes "github.com/openshift/installer/pkg/types/vsphere"
@@ -39,7 +40,7 @@ func (a *MCSCertKey) Generate(dependencies asset.Parents) error {
 	hostname := internalAPIAddress(installConfig.Config)
 
 	cfg := &CertCfg{
-		Subject:      pkix.Name{CommonName: hostname},
+		Subject:      pkix.Name{CommonName: "system:machine-config-server"},
 		ExtKeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		Validity:     ValidityTenYears,
 	}
@@ -55,10 +56,14 @@ func (a *MCSCertKey) Generate(dependencies asset.Parents) error {
 		cfg.IPAddresses = []net.IP{net.ParseIP(installConfig.Config.Ovirt.APIVIP)}
 		cfg.DNSNames = []string{hostname, installConfig.Config.Ovirt.APIVIP}
 	case vspheretypes.Name:
+		cfg.DNSNames = []string{hostname}
 		if installConfig.Config.VSphere.APIVIP != "" {
 			cfg.IPAddresses = []net.IP{net.ParseIP(installConfig.Config.VSphere.APIVIP)}
-			cfg.DNSNames = []string{hostname, installConfig.Config.VSphere.APIVIP}
+			cfg.DNSNames = append(cfg.DNSNames, installConfig.Config.VSphere.APIVIP)
 		}
+	case kubevirttypes.Name:
+		cfg.IPAddresses = []net.IP{net.ParseIP(installConfig.Config.Kubevirt.APIVIP)}
+		cfg.DNSNames = []string{hostname, installConfig.Config.Kubevirt.APIVIP}
 	default:
 		cfg.DNSNames = []string{hostname}
 	}
